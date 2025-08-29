@@ -44,6 +44,7 @@ public class HospitalManagement extends Application{
 	private StaffRepository staffRepo;
 	private MedicalRepository medicalRepo;
 	private LabRepository labRepo;
+	private FacilityRepository facilityRepo;
 	
 	private static String ns(String s) { return (s == null) ? "" : s; }
 	
@@ -122,6 +123,7 @@ public class HospitalManagement extends Application{
 		staffRepo = new SqlStaffRepository(Db.get());
 		medicalRepo = new SqlMedicalRepository(Db.get());
 		labRepo = new SqlLabRepository(Db.get());
+		facilityRepo = new SqlFacilityRepository(Db.get());
 		
 		// ----------------------------------------------------------------------------------
 		// MAIN MENU (modern, minimal, larger)
@@ -1026,52 +1028,47 @@ public class HospitalManagement extends Application{
 		});
 		
 		addFacilityTo.setOnAction(e -> {
-		    facilityTf2.setText("");
+		    facilityTf2.setText(""); // status/feedback label
 
-		    final String name = facilityTf1.getText().trim();
+		    final String name = facilityTf1.getText().trim(); // facility name
+
 		    if (name.isEmpty()) {
 		        facilityTf2.setText("Please enter a facility name.");
 		        return;
 		    }
 
-		    // duplicate by facility name
-		    for (Facility f : facilities) {
-		        if (f != null && name.equalsIgnoreCase(f.getFacility())) {
-		            facilityTf2.setText("A facility with this name already exists.");
-		            return;
-		        }
+		    if (facilityRepo.findByName(name).isPresent()) {
+		        facilityTf2.setText("This facility already exists.");
+		        return;
 		    }
 
-		    boolean inserted = false;
-		    Facility newFacility = new Facility(name);
-		    for (int i = 0; i < facilities.length; i++) {
-		        if (facilities[i] == null) { facilities[i] = newFacility; inserted = true; break; }
-		    }
-
-		    if (!inserted) { facilityTf2.setText("Facility list is full. Unable to add."); return; }
+		    boolean ok = facilityRepo.insert(new Facility(name));
+		    if (!ok) { facilityTf2.setText("Failed to add facility."); return; }
 
 		    facilityTf2.setText("New FACILITY added successfully.");
 		    facilityTf1.clear();
 		});
-
-		
+	
 		showFacility.setOnAction(e -> {
-			facilityV2.getChildren().clear();
-			Label columnHeaderLabel = new Label(" Facility");
-			ListView<String> facilityListView = new ListView<>();
-			facilityListView.setStyle("-fx-font-family: 'Courier New';");
-			columnHeaderLabel.setStyle("-fx-font-family: 'Courier New';");
-			for(Facility facility: facilities) {
-				if(facility != null) {
-					facilityListView.getItems().add(facility.showFacility());
-				}
-			}
-			facilityListView.setPrefHeight(550);
-			facilityListView.setPrefWidth(470);
-			facilityV2.getChildren().addAll(columnHeaderLabel, facilityListView);
+		    facilityV2.getChildren().clear();
+
+		    Label columnHeaderLabel = new Label("  Facility Name");
+		    columnHeaderLabel.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
+
+		    ListView<String> facilityListView = new ListView<>();
+		    facilityListView.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
+
+		    facilityListView.getItems().clear();
+		    for (Facility f : facilityRepo.findAll()) {
+		        facilityListView.getItems().add(f.showFacility()); // or f.getFacility()
+		    }
+
+		    facilityListView.setPlaceholder(new Label("No facilities found."));
+		    facilityListView.setPrefHeight(550);
+		    facilityListView.setPrefWidth(500);
+
+		    facilityV2.getChildren().addAll(columnHeaderLabel, facilityListView);
 		});
-		
-		
 	
 		// ----------------------------------------------------------------------------------
 		// Button functions

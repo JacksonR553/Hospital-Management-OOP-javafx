@@ -53,6 +53,8 @@ public final class Db {
             s.execute("CREATE TABLE IF NOT EXISTS lab(" +
                     "name TEXT PRIMARY KEY," +
                     "cost INTEGER NOT NULL)");
+            s.execute("CREATE TABLE IF NOT EXISTS facility(" +
+                    "name TEXT PRIMARY KEY)");
             // add other tables later (doctor, staff, etc.)
         } catch (SQLException e) {
             throw new RuntimeException(e);
