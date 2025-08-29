@@ -1,0 +1,42 @@
+# Build outputs
+/bin/
+/target/
+/out/
+
+# Eclipse / IDE
+.project
+.classpath
+.settings/
+.metadata/
+.recommenders/
+.factorypath
+
+# IntelliJ (if anyone opens it there)
+.idea/
+*.iml
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Logs & temp
+*.log
+*.tmp
+
+# Java / tooling
+hs_err_pid*
+replay_pid*
+
+# JavaFX SDK (if you copied libs into the repo)
+javafx-sdk*/ 
+
+# Local database & backups (keep DB out of Git)
+*.db
+*.db-shm
+*.db-wal
+/backups/
+
+# Generated artifacts
+*.jar
+*.war
+*.zip
