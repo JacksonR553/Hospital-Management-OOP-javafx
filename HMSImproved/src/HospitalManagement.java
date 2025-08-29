@@ -38,6 +38,8 @@ public class HospitalManagement extends Application{
 	// --- App layout constants ---
 	private static final double APP_WIDTH  = 1000;
 	private static final double APP_HEIGHT = 700;
+	// persistence
+	private PatientRepository patientRepo;
 	
     private void initializeStaffs() {
     	staffs[0] = new Staff("412", "Lim Boon Chong", "Nurse", "Female", 3000);
@@ -106,6 +108,10 @@ public class HospitalManagement extends Application{
 	public void start(Stage primaryStage) throws Exception {
 		// TODO Auto-generated method stub
 		initialize();
+		
+		// database
+		Db.bootstrap();
+		patientRepo = new SqlPatientRepository(Db.get());
 		
 		// ----------------------------------------------------------------------------------
 		// MAIN MENU (modern, minimal, larger)
@@ -576,7 +582,7 @@ public class HospitalManagement extends Application{
 		});
 		
 		addPatientTo.setOnAction(e -> {
-		    patientTf7.setText(""); // clear message
+		    patientTf7.setText("");
 
 		    final String id = patientTf1.getText().trim();
 		    final String name = patientTf2.getText().trim();
@@ -599,33 +605,19 @@ public class HospitalManagement extends Application{
 		        return;
 		    }
 
-		    // duplicate ID check
-		    for (Patient p : patients) {
-		        if (p != null && id.equalsIgnoreCase(p.getId())) {
-		            patientTf7.setText("A patient with this ID already exists.");
-		            return;
-		        }
+		    // duplicate check via repository
+		    if (patientRepo.findById(id).isPresent()) {
+		        patientTf7.setText("A patient with this ID already exists.");
+		        return;
 		    }
 
-		    // capacity check + insert
-		    boolean inserted = false;
-		    Patient newPatient = new Patient(id, name, disease, sex, admitStatus, age);
-		    for (int i = 0; i < patients.length; i++) {
-		        if (patients[i] == null) {
-		            patients[i] = newPatient;
-		            inserted = true;
-		            break;
-		        }
-		    }
-
-		    if (!inserted) {
-		        patientTf7.setText("Patient list is full. Unable to add.");
+		    boolean ok = patientRepo.insert(new Patient(id, name, disease, sex, admitStatus, age));
+		    if (!ok) {
+		        patientTf7.setText("Failed to add patient.");
 		        return;
 		    }
 
 		    patientTf7.setText("New PATIENT added successfully.");
-
-		    // clear inputs for next entry
 		    patientTf1.clear(); patientTf2.clear(); patientTf3.clear();
 		    patientTf4.clear(); patientTf5.clear(); patientTf6.clear();
 		});
@@ -636,11 +628,9 @@ public class HospitalManagement extends Application{
 			Label columnHeaderLabel = monospaceHeader("  ID       Name               Disease       Sex      Admit Status");
 			ListView<String> patientListView = new ListView<>();
 			patientListView.setStyle("-fx-font-family: 'Courier New';");
-//			columnHeaderLabel.setStyle("-fx-font-family: 'Courier New';");
-			for(Patient patient: patients) {
-				if(patient != null) {
-					patientListView.getItems().add(patient.showPatientInfo());
-				}
+			patientListView.getItems().clear();
+			for (Patient p : patientRepo.findAll()) {
+			    patientListView.getItems().add(p.showPatientInfo());
 			}
 			patientListView.setPrefHeight(550);
 			patientListView.setPrefWidth(470);
