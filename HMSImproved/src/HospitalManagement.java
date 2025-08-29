@@ -40,6 +40,9 @@ public class HospitalManagement extends Application{
 	private static final double APP_HEIGHT = 700;
 	// persistence
 	private PatientRepository patientRepo;
+	private DoctorRepository doctorRepo;
+	
+	private static String ns(String s) { return (s == null) ? "" : s; }
 	
     private void initializeStaffs() {
     	staffs[0] = new Staff("412", "Lim Boon Chong", "Nurse", "Female", 3000);
@@ -112,6 +115,8 @@ public class HospitalManagement extends Application{
 		// database
 		Db.bootstrap();
 		patientRepo = new SqlPatientRepository(Db.get());
+		doctorRepo = new SqlDoctorRepository(Db.get());
+
 		
 		// ----------------------------------------------------------------------------------
 		// MAIN MENU (modern, minimal, larger)
@@ -461,20 +466,13 @@ public class HospitalManagement extends Application{
 		        return;
 		    }
 
-		    for (Doctor d : doctors) {
-		        if (d != null && id.equalsIgnoreCase(d.getId())) {
-		            doctorTf7.setText("A doctor with this ID already exists.");
-		            return;
-		        }
+		    if (doctorRepo.findById(id).isPresent()) {
+		        doctorTf7.setText("A doctor with this ID already exists.");
+		        return;
 		    }
 
-		    boolean inserted = false;
-		    Doctor newDoctor = new Doctor(id, name, specialist, workTime, qualification, room);
-		    for (int i = 0; i < doctors.length; i++) {
-		        if (doctors[i] == null) { doctors[i] = newDoctor; inserted = true; break; }
-		    }
-
-		    if (!inserted) { doctorTf7.setText("Doctor list is full. Unable to add."); return; }
+		    boolean ok = doctorRepo.insert(new Doctor(id, name, specialist, workTime, qualification, room));
+		    if (!ok) { doctorTf7.setText("Failed to add doctor."); return; }
 
 		    doctorTf7.setText("New DOCTOR added successfully.");
 		    doctorTf1.clear(); doctorTf2.clear(); doctorTf3.clear();
@@ -483,20 +481,34 @@ public class HospitalManagement extends Application{
 
 		
 		showDoctor.setOnAction(e -> {
-			doctorV2.getChildren().clear();
-			Label columnHeaderLabel = new Label("  ID            Name         Specialist   Work Time   Qualification");
-			ListView<String> doctorListView = new ListView<>();
-			doctorListView.setStyle("-fx-font-family: 'Courier New';");
-			columnHeaderLabel.setStyle("-fx-font-family: 'Courier New';");
-			for(Doctor doctor: doctors) {
-				if(doctor != null) {
-					doctorListView.getItems().add(doctor.showDoctorInfo());
-				}
-			}
-			doctorListView.setPrefHeight(550);
-			doctorListView.setPrefWidth(470);
-			doctorV2.getChildren().addAll(columnHeaderLabel, doctorListView);
+		    doctorV2.getChildren().clear();
+
+		    // Monospace header so rows align
+		    Label columnHeaderLabel = new Label("  ID        Name                 Specialist           Work Time   Qualification     Room");
+		    columnHeaderLabel.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
+
+		    // List view in monospace as well
+		    ListView<String> doctorListView = new ListView<>();
+		    doctorListView.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
+
+		    // Load from repository (DB) instead of the doctors[] array
+		    doctorListView.getItems().clear();
+		    for (Doctor d : doctorRepo.findAll()) {
+		        String row = String.format("%-10s%-20s%-22s%-12s%-18s%6d",
+		                d.getId(),
+		                d.getName(),
+		                d.getSpecialist(),
+		                d.getWorkTime(),
+		                d.getQualification(),
+		                d.getRoom());
+		        doctorListView.getItems().add(row);
+		    }
+
+		    doctorListView.setPrefHeight(550);
+		    doctorListView.setPrefWidth(700); // wider to fit columns nicely
+		    doctorV2.getChildren().addAll(columnHeaderLabel, doctorListView);
 		});
+
 		
 		// ----------------------------------------------------------------------------------
 		// Patient Menu
@@ -624,18 +636,35 @@ public class HospitalManagement extends Application{
 
 			
 		showPatient.setOnAction(e -> {
-			patientV2.getChildren().clear();
-			Label columnHeaderLabel = monospaceHeader("  ID       Name               Disease       Sex      Admit Status");
-			ListView<String> patientListView = new ListView<>();
-			patientListView.setStyle("-fx-font-family: 'Courier New';");
-			patientListView.getItems().clear();
-			for (Patient p : patientRepo.findAll()) {
-			    patientListView.getItems().add(p.showPatientInfo());
-			}
-			patientListView.setPrefHeight(550);
-			patientListView.setPrefWidth(470);
-			patientV2.getChildren().addAll(columnHeaderLabel, patientListView);
+		    patientV2.getChildren().clear();
+
+		    // Monospace header so columns line up
+		    Label columnHeaderLabel = new Label("  ID        Name                 Disease             Sex    Admit Status      Age");
+		    columnHeaderLabel.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
+
+		    ListView<String> patientListView = new ListView<>();
+		    patientListView.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
+
+		    // Load from repository (DB)
+		    patientListView.getItems().clear();
+		    for (Patient p : patientRepo.findAll()) {
+		        String row = String.format("%-10s%-20s%-22s%-8s%-18s%5d",
+		                ns(p.getId()),
+		                ns(p.getName()),
+		                ns(p.getDisease()),
+		                ns(p.getSex()),
+		                ns(p.getAdmitStatus()),
+		                p.getAge());
+		        patientListView.getItems().add(row);
+		    }
+
+		    patientListView.setPlaceholder(new Label("No patients found."));
+		    patientListView.setPrefHeight(550);
+		    patientListView.setPrefWidth(700); // wider so all columns fit
+
+		    patientV2.getChildren().addAll(columnHeaderLabel, patientListView);
 		});
+
 				
 		// ----------------------------------------------------------------------------------
 		// Medical menu

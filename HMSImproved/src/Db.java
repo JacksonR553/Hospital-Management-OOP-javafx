@@ -31,6 +31,13 @@ public final class Db {
                       "sex TEXT NOT NULL," +
                       "admit_status TEXT NOT NULL," +
                       "age INTEGER NOT NULL)");
+            s.execute("CREATE TABLE IF NOT EXISTS doctor(" +
+                    "id TEXT PRIMARY KEY," +
+                    "name TEXT NOT NULL," +
+                    "specialist TEXT NOT NULL," +
+                    "work_time TEXT NOT NULL," +
+                    "qualification TEXT NOT NULL," +
+                    "room INTEGER NOT NULL)");
             // add other tables later (doctor, staff, etc.)
         } catch (SQLException e) {
             throw new RuntimeException(e);
