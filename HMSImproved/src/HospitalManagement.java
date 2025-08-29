@@ -42,6 +42,7 @@ public class HospitalManagement extends Application{
 	private PatientRepository patientRepo;
 	private DoctorRepository doctorRepo;
 	private StaffRepository staffRepo;
+	private MedicalRepository medicalRepo;
 	
 	private static String ns(String s) { return (s == null) ? "" : s; }
 	
@@ -118,6 +119,7 @@ public class HospitalManagement extends Application{
 		patientRepo = new SqlPatientRepository(Db.get());
 		doctorRepo = new SqlDoctorRepository(Db.get());
 		staffRepo = new SqlStaffRepository(Db.get());
+		medicalRepo = new SqlMedicalRepository(Db.get());
 		
 		// ----------------------------------------------------------------------------------
 		// MAIN MENU (modern, minimal, larger)
@@ -754,12 +756,18 @@ public class HospitalManagement extends Application{
 
 		    final String name = medicalTf1.getText().trim();
 		    final String manufacturer = medicalTf2.getText().trim();
-		    final String expiryDate = medicalTf3.getText().trim();
+		    final String expiry = medicalTf3.getText().trim();   // expect YYYY-MM-DD
 		    final String costStr = medicalTf4.getText().trim();
 		    final String countStr = medicalTf5.getText().trim();
 
-		    if (name.isEmpty() || manufacturer.isEmpty() || expiryDate.isEmpty() || costStr.isEmpty() || countStr.isEmpty()) {
+		    if (name.isEmpty() || manufacturer.isEmpty() || expiry.isEmpty() || costStr.isEmpty() || countStr.isEmpty()) {
 		        medicalTf6.setText("Please fill in all fields.");
+		        return;
+		    }
+
+		    // simple date sanity check (YYYY-MM-DD)
+		    if (!expiry.matches("\\d{4}-\\d{2}-\\d{2}")) {
+		        medicalTf6.setText("Expiry must be YYYY-MM-DD.");
 		        return;
 		    }
 
@@ -769,47 +777,48 @@ public class HospitalManagement extends Application{
 		        count = Integer.parseInt(countStr);
 		        if (cost < 0 || count < 0) throw new NumberFormatException("negative");
 		    } catch (NumberFormatException nfe) {
-		        medicalTf6.setText("Cost and Unit must be non-negative numbers.");
+		        medicalTf6.setText("Cost and Count must be non-negative numbers.");
 		        return;
 		    }
 
-		    // duplicate by medicine name (reasonable for demo)
-		    for (Medical m : medicals) {
-		        if (m != null && name.equalsIgnoreCase(m.getName())) {
-		            medicalTf6.setText("A medicine with this name already exists.");
-		            return;
-		        }
+		    if (medicalRepo.findByName(name).isPresent()) {
+		        medicalTf6.setText("A medicine with this name already exists.");
+		        return;
 		    }
 
-		    boolean inserted = false;
-		    Medical newMed = new Medical(name, manufacturer, expiryDate, cost, count);
-		    for (int i = 0; i < medicals.length; i++) {
-		        if (medicals[i] == null) { medicals[i] = newMed; inserted = true; break; }
-		    }
-
-		    if (!inserted) { medicalTf6.setText("Medical list is full. Unable to add."); return; }
+		    boolean ok = medicalRepo.insert(new Medical(name, manufacturer, expiry, cost, count));
+		    if (!ok) { medicalTf6.setText("Failed to add medical."); return; }
 
 		    medicalTf6.setText("New MEDICAL added successfully.");
 		    medicalTf1.clear(); medicalTf2.clear(); medicalTf3.clear();
 		    medicalTf4.clear(); medicalTf5.clear();
 		});
-
-
 		
 		showMedical.setOnAction(e -> {
-			medicalV2.getChildren().clear();
-			Label columnHeaderLabel = new Label("  Name             Manufacturer          Expiry Date      Cost ");
-			ListView<String> medicalListView = new ListView<>();
-			medicalListView.setStyle("-fx-font-family: 'Courier New';");
-			columnHeaderLabel.setStyle("-fx-font-family: 'Courier New';");
-			for(Medical medical: medicals) {
-				if(medical != null) {
-					medicalListView.getItems().add(medical.findMedical());
-				}
-			}
-			medicalListView.setPrefHeight(550);
-			medicalListView.setPrefWidth(470);
-			medicalV2.getChildren().addAll(columnHeaderLabel, medicalListView);
+		    medicalV2.getChildren().clear();
+
+		    Label columnHeaderLabel = new Label("  Name                 Manufacturer         Expiry       Cost   Count");
+		    columnHeaderLabel.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
+
+		    ListView<String> medicalListView = new ListView<>();
+		    medicalListView.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
+
+		    medicalListView.getItems().clear();
+		    for (Medical m : medicalRepo.findAll()) {
+		        String row = String.format("%-22s%-22s%-13s%7d%7d",
+		                ns(m.getName()),
+		                ns(m.getManufacturer()),
+		                ns(m.getExpiryDate()),
+		                m.getCost(),
+		                m.getCount());
+		        medicalListView.getItems().add(row);
+		    }
+
+		    medicalListView.setPlaceholder(new Label("No medicines found."));
+		    medicalListView.setPrefHeight(550);
+		    medicalListView.setPrefWidth(700);
+
+		    medicalV2.getChildren().addAll(columnHeaderLabel, medicalListView);
 		});
 		
 		// ----------------------------------------------------------------------------------

@@ -44,7 +44,12 @@ public final class Db {
                     "designation TEXT NOT NULL," +
                     "sex TEXT NOT NULL," +
                     "salary INTEGER NOT NULL)");
-
+            s.execute("CREATE TABLE IF NOT EXISTS medical(" +
+                    "name TEXT PRIMARY KEY," +
+                    "manufacturer TEXT NOT NULL," +
+                    "expiry_date TEXT NOT NULL," +   // store as YYYY-MM-DD string
+                    "cost INTEGER NOT NULL," +
+                    "count INTEGER NOT NULL)");
             // add other tables later (doctor, staff, etc.)
         } catch (SQLException e) {
             throw new RuntimeException(e);
