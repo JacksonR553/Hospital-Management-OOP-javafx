@@ -41,6 +41,7 @@ public class HospitalManagement extends Application{
 	// persistence
 	private PatientRepository patientRepo;
 	private DoctorRepository doctorRepo;
+	private StaffRepository staffRepo;
 	
 	private static String ns(String s) { return (s == null) ? "" : s; }
 	
@@ -116,7 +117,7 @@ public class HospitalManagement extends Application{
 		Db.bootstrap();
 		patientRepo = new SqlPatientRepository(Db.get());
 		doctorRepo = new SqlDoctorRepository(Db.get());
-
+		staffRepo = new SqlStaffRepository(Db.get());
 		
 		// ----------------------------------------------------------------------------------
 		// MAIN MENU (modern, minimal, larger)
@@ -324,20 +325,13 @@ public class HospitalManagement extends Application{
 		        return;
 		    }
 
-		    for (Staff s : staffs) {
-		        if (s != null && id.equalsIgnoreCase(s.getId())) {
-		            staffTf6.setText("A staff with this ID already exists.");
-		            return;
-		        }
+		    if (staffRepo.findById(id).isPresent()) {
+		        staffTf6.setText("A staff member with this ID already exists.");
+		        return;
 		    }
 
-		    boolean inserted = false;
-		    Staff newStaff = new Staff(id, name, designation, sex, salary);
-		    for (int i = 0; i < staffs.length; i++) {
-		        if (staffs[i] == null) { staffs[i] = newStaff; inserted = true; break; }
-		    }
-
-		    if (!inserted) { staffTf6.setText("Staff list is full. Unable to add."); return; }
+		    boolean ok = staffRepo.insert(new Staff(id, name, designation, sex, salary));
+		    if (!ok) { staffTf6.setText("Failed to add staff."); return; }
 
 		    staffTf6.setText("New STAFF added successfully.");
 		    staffTf1.clear(); staffTf2.clear(); staffTf3.clear();
@@ -346,20 +340,28 @@ public class HospitalManagement extends Application{
 
 		
 		showStaff.setOnAction(e -> {
-			staffV2.getChildren().clear();
-			Label columnHeaderLabel = new Label("  ID       Name            Designation            Sex    Salary");
-			ListView<String> staffListView = new ListView<>();
-			staffListView.setStyle("-fx-font-family: 'Courier New';");
-			columnHeaderLabel.setStyle("-fx-font-family: 'Courier New';");
-			for(Staff staff: staffs) {
-				if(staff != null) {
-					staffListView.getItems().add(staff.showStaffInfo());
-				}
-			}
-			staffListView.setPrefHeight(550);
-			staffListView.setPrefWidth(470);
-			staffV2.getChildren().addAll(columnHeaderLabel, staffListView);
+		    staffV2.getChildren().clear();
+
+		    Label columnHeaderLabel = new Label("  ID        Name                 Designation         Sex     Salary");
+		    columnHeaderLabel.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
+
+		    ListView<String> staffListView = new ListView<>();
+		    staffListView.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
+
+		    staffListView.getItems().clear();
+		    for (Staff s : staffRepo.findAll()) {
+		        String row = String.format("%-10s%-20s%-20s%-8s%8d",
+		                s.getId(), s.getName(), s.getDesignation(), s.getSex(), s.getSalary());
+		        staffListView.getItems().add(row);
+		    }
+
+		    staffListView.setPlaceholder(new Label("No staff found."));
+		    staffListView.setPrefHeight(550);
+		    staffListView.setPrefWidth(700);
+
+		    staffV2.getChildren().addAll(columnHeaderLabel, staffListView);
 		});
+
 		
 		// ----------------------------------------------------------------------------------
 		// Doctor Menu
