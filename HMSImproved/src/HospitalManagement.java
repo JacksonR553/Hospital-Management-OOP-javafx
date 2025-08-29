@@ -43,6 +43,7 @@ public class HospitalManagement extends Application{
 	private DoctorRepository doctorRepo;
 	private StaffRepository staffRepo;
 	private MedicalRepository medicalRepo;
+	private LabRepository labRepo;
 	
 	private static String ns(String s) { return (s == null) ? "" : s; }
 	
@@ -120,6 +121,7 @@ public class HospitalManagement extends Application{
 		doctorRepo = new SqlDoctorRepository(Db.get());
 		staffRepo = new SqlStaffRepository(Db.get());
 		medicalRepo = new SqlMedicalRepository(Db.get());
+		labRepo = new SqlLabRepository(Db.get());
 		
 		// ----------------------------------------------------------------------------------
 		// MAIN MENU (modern, minimal, larger)
@@ -896,12 +898,12 @@ public class HospitalManagement extends Application{
 		});
 		
 		addLabTo.setOnAction(e -> {
-		    labTf3.setText("");
+		    labTf3.setText(""); // status/feedback label
 
-		    final String labName = labTf1.getText().trim();
-		    final String costStr = labTf2.getText().trim();
+		    final String name = labTf1.getText().trim();   // lab name
+		    final String costStr = labTf2.getText().trim(); // cost
 
-		    if (labName.isEmpty() || costStr.isEmpty()) {
+		    if (name.isEmpty() || costStr.isEmpty()) {
 		        labTf3.setText("Please fill in all fields.");
 		        return;
 		    }
@@ -915,44 +917,42 @@ public class HospitalManagement extends Application{
 		        return;
 		    }
 
-		    // duplicate by lab name
-		    for (Lab l : labs) {
-		        if (l != null && labName.equalsIgnoreCase(l.getLab())) {
-		            labTf3.setText("A lab with this name already exists.");
-		            return;
-		        }
+		    if (labRepo.findByName(name).isPresent()) {
+		        labTf3.setText("A lab/test with this name already exists.");
+		        return;
 		    }
 
-		    boolean inserted = false;
-		    Lab newLab = new Lab(labName, cost);
-		    for (int i = 0; i < labs.length; i++) {
-		        if (labs[i] == null) { labs[i] = newLab; inserted = true; break; }
-		    }
-
-		    if (!inserted) { labTf3.setText("Lab list is full. Unable to add."); return; }
+		    boolean ok = labRepo.insert(new Lab(name, cost));
+		    if (!ok) { labTf3.setText("Failed to add lab."); return; }
 
 		    labTf3.setText("New LAB added successfully.");
 		    labTf1.clear(); labTf2.clear();
 		});
 
-		
 		showLab.setOnAction(e -> {
-			labV2.getChildren().clear();
-			Label columnHeaderLabel = new Label("  Lab     Cost");
-			ListView<String> labListView = new ListView<>();
-			labListView.setStyle("-fx-font-family: 'Courier New';");
-			columnHeaderLabel.setStyle("-fx-font-family: 'Courier New';");
-			for(Lab lab: labs) {
-				if(lab != null) {
-					labListView.getItems().add(lab.labList());
-				}
-			}
-			labListView.setPrefHeight(550);
-			labListView.setPrefWidth(470);
-			labV2.getChildren().addAll(columnHeaderLabel, labListView);
+		    labV2.getChildren().clear();
+
+		    Label columnHeaderLabel = new Label("  Lab/Test Name              Cost");
+		    columnHeaderLabel.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
+
+		    ListView<String> labListView = new ListView<>();
+		    labListView.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
+
+		    labListView.getItems().clear();
+		    for (Lab l : labRepo.findAll()) {
+		        String row = String.format("%-28s%8d",
+		                (l.getLab() == null ? "" : l.getLab()),
+		                l.getCost());
+		        labListView.getItems().add(row);
+		    }
+
+		    labListView.setPlaceholder(new Label("No labs/tests found."));
+		    labListView.setPrefHeight(550);
+		    labListView.setPrefWidth(500);
+
+		    labV2.getChildren().addAll(columnHeaderLabel, labListView);
 		});
-		
-		
+	
 		// ----------------------------------------------------------------------------------
 		// Facility menu
 		// Buttons

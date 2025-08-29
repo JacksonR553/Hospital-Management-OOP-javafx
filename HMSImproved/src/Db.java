@@ -50,6 +50,9 @@ public final class Db {
                     "expiry_date TEXT NOT NULL," +   // store as YYYY-MM-DD string
                     "cost INTEGER NOT NULL," +
                     "count INTEGER NOT NULL)");
+            s.execute("CREATE TABLE IF NOT EXISTS lab(" +
+                    "name TEXT PRIMARY KEY," +
+                    "cost INTEGER NOT NULL)");
             // add other tables later (doctor, staff, etc.)
         } catch (SQLException e) {
             throw new RuntimeException(e);
