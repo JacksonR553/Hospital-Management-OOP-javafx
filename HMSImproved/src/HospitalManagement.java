@@ -3,6 +3,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.List;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
@@ -29,12 +30,6 @@ import javafx.animation.Timeline;
 import javafx.util.Duration;
 
 public class HospitalManagement extends Application{
-	private Doctor[] doctors = new Doctor[25];
-	private Patient[] patients = new Patient[100];
-    private Lab[] labs = new Lab[20];
-    private Facility[] facilities = new Facility[20];
-    private Medical[] medicals = new Medical[100];
-    private Staff[] staffs = new Staff[100];
 	// --- App layout constants ---
 	private static final double APP_WIDTH  = 1000;
 	private static final double APP_HEIGHT = 700;
@@ -45,53 +40,6 @@ public class HospitalManagement extends Application{
 	private MedicalRepository medicalRepo;
 	private LabRepository labRepo;
 	private FacilityRepository facilityRepo;
-	
-	private static String ns(String s) { return (s == null) ? "" : s; }
-	
-    private void initializeStaffs() {
-    	staffs[0] = new Staff("412", "Lim Boon Chong", "Nurse", "Female", 3000);
-    	staffs[1] = new Staff("348", "Teoh Ming Xue", "Receptionist", "Male", 2500);
-    	staffs[2] = new Staff("934", "Lim Jie Yew", "Janitor", "Male", 2000);
-    }
-    
-	public void initializeDoctors() {
-        doctors[0] = new Doctor("412", "Dr. Lim Boon Chong", "Surgeon", "8-11AM", "MBBS,MD", 11);
-        doctors[1] = new Doctor("348", "Dr. Teoh Ming Xue", "Physician", "10-3AM", "MBBS,MS", 45);
-        doctors[2] = new Doctor("934", "Dr. Lim Jie Yew", "Surgeon", "7-11AM", "MBBS,MD", 8);
-    }
-	
-	private void initializePatients() {
-    	patients[0] = new Patient("412", "Lim Boon Chong", "Fever", "Female", "Admitted", 30);
-        patients[1] = new Patient("348", "Teoh Ming Xue", "Broken Arm", "Male", "Admitted", 25);
-        patients[2] = new Patient("934", "Lim Jie Yew", "Headache", "Female", "Discharged", 40);
-    }
-
-	private void initializeMedicals() {
-		medicals[0] = new Medical("Aspirin", "Pfizer", "2023-12-31", 5, 100);
-		medicals[1] = new Medical("Ibuprofen", "Novartis", "2023-11-30", 8, 150);
-		medicals[2] = new Medical("Amoxicillin", "Roche", "2024-02-28", 12, 80);
-	}
-	
-    private void initializeLabs() {
-    	labs[0] = new Lab("Lab A", 2000);
-        labs[1] = new Lab("Lab B", 1500);
-        labs[2] = new Lab("Lab C", 1800);
-    }
-
-    private void initializeFacilities() {
-    	facilities[0] = new Facility("MRI Room");
-        facilities[1] = new Facility("X-ray Room");
-        facilities[2] = new Facility("Surgery Theater");
-    }
-
-    private void initialize() {
-        initializeDoctors();
-        initializePatients();
-        initializeLabs();
-        initializeFacilities();
-        initializeMedicals();
-        initializeStaffs();
-    }
     
     private String getCurrentDateTime() {
         LocalDateTime currentDateTime = LocalDateTime.now();
@@ -104,7 +52,138 @@ public class HospitalManagement extends Application{
         l.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
         return l;
     }
+    
+    // ==== Patient update workflow state ====
+    private ListView<String> patientListView;        // list shown in "Show Patient" view
+    private String selectedPatientId = null;         // PK of selected row for update
+    private javafx.event.EventHandler<javafx.event.ActionEvent> originalAddPatientHandler; // to restore after Update mode
+    
+ // ==== Staff update workflow state ====
+    private ListView<String> staffListView;
+    private String selectedStaffId = null;
+    private javafx.event.EventHandler<javafx.event.ActionEvent> originalAddStaffHandler;
 
+    // ==== Doctor update workflow state ====
+    private ListView<String> doctorListView;
+    private String selectedDoctorId = null;
+    private javafx.event.EventHandler<javafx.event.ActionEvent> originalAddDoctorHandler;
+
+    // ==== Medical update workflow state (PK = name) ====
+    private ListView<String> medicalListView;
+    private String selectedMedicalName = null;
+    private javafx.event.EventHandler<javafx.event.ActionEvent> originalAddMedicalHandler;
+
+    // ==== Lab update workflow state (PK = name) ====
+    private ListView<String> labListView;
+    private String selectedLabName = null;
+    private javafx.event.EventHandler<javafx.event.ActionEvent> originalAddLabHandler;
+
+    // ==== Facility update workflow state (PK = name) ====
+    private ListView<String> facilityListView;
+    private String selectedFacilityName = null;
+    private javafx.event.EventHandler<javafx.event.ActionEvent> originalAddFacilityHandler;
+    
+    private static String ns(String s) { return s == null ? "" : s; }
+    
+    private static boolean confirm(String title, String content) {
+        var a = new javafx.scene.control.Alert(javafx.scene.control.Alert.AlertType.CONFIRMATION);
+        a.setTitle(title); a.setHeaderText(null); a.setContentText(content);
+        var res = a.showAndWait();
+        return res.isPresent() && res.get() == javafx.scene.control.ButtonType.OK;
+    }
+    
+ // === Sorting helpers ===
+    private static int cmpId(String a, String b) {
+        if (a == null) a = "";
+        if (b == null) b = "";
+        try {
+            return Integer.compare(Integer.parseInt(a.trim()), Integer.parseInt(b.trim()));
+        } catch (NumberFormatException ex) {
+            return a.compareToIgnoreCase(b); // fallback if IDs aren't pure numbers
+        }
+    }
+    private static int cmpName(String a, String b) {
+        if (a == null) a = "";
+        if (b == null) b = "";
+        return a.compareToIgnoreCase(b);
+    }
+
+    // === Sorted refreshers for each ListView ===
+    private void refreshPatientList() {
+        if (patientListView == null) return;
+        patientListView.getItems().clear();
+        java.util.List<Patient> all = new java.util.ArrayList<>(patientRepo.findAll());
+        all.sort((p1, p2) -> cmpId(p1.getId(), p2.getId()));
+        for (Patient p : all) {
+            String row = String.format("%-10s%-20s%-22s%-8s%-18s%5d",
+                ns(p.getId()), ns(p.getName()), ns(p.getDisease()),
+                ns(p.getSex()), ns(p.getAdmitStatus()), p.getAge());
+            patientListView.getItems().add(row);
+        }
+    }
+    private void refreshStaffList() {
+        if (staffListView == null) return;
+        staffListView.getItems().clear();
+        java.util.List<Staff> all = new java.util.ArrayList<>(staffRepo.findAll());
+        all.sort((s1, s2) -> cmpId(s1.getId(), s2.getId()));
+        for (Staff s : all) {
+            String row = String.format("%-10s%-20s%-20s%-8s%8d",
+                ns(s.getId()), ns(s.getName()), ns(s.getDesignation()), ns(s.getSex()), s.getSalary());
+            staffListView.getItems().add(row);
+        }
+    }
+    private void refreshDoctorList() {
+        if (doctorListView == null) return;
+        doctorListView.getItems().clear();
+        java.util.List<Doctor> all = new java.util.ArrayList<>(doctorRepo.findAll());
+        all.sort((d1, d2) -> cmpId(d1.getId(), d2.getId()));
+        for (Doctor d : all) {
+            String row = String.format("%-10s%-20s%-22s%-12s%-20s%6d",
+                ns(d.getId()), ns(d.getName()), ns(d.getSpecialist()),
+                ns(d.getWorkTime()), ns(d.getQualification()), d.getRoom());
+            doctorListView.getItems().add(row);
+        }
+    }
+    private void refreshMedicalList() {
+        if (medicalListView == null) return;
+        medicalListView.getItems().clear();
+        java.util.List<Medical> all = new java.util.ArrayList<>(medicalRepo.findAll());
+        all.sort((m1, m2) -> cmpName(m1.getName(), m2.getName())); // PK = name
+        for (Medical m : all) {
+            String row = String.format("%-22s%-22s%-13s%7d%7d",
+                ns(m.getName()), ns(m.getManufacturer()), ns(m.getExpiryDate()), m.getCost(), m.getCount());
+            medicalListView.getItems().add(row);
+        }
+    }
+    private void refreshLabList() {
+        if (labListView == null) return;
+        labListView.getItems().clear();
+        java.util.List<Lab> all = new java.util.ArrayList<>(labRepo.findAll());
+        all.sort((l1, l2) -> cmpName(l1.getLab(), l2.getLab())); // PK = name
+        for (Lab l : all) {
+            String row = String.format("%-28s%8d", ns(l.getLab()), l.getCost());
+            labListView.getItems().add(row);
+        }
+    }
+    private void refreshFacilityList() {
+        if (facilityListView == null) return;
+        facilityListView.getItems().clear();
+        java.util.List<Facility> all = new java.util.ArrayList<>(facilityRepo.findAll());
+        all.sort((f1, f2) -> cmpName(f1.showFacility(), f2.showFacility())); // PK = name
+        for (Facility f : all) {
+            facilityListView.getItems().add(ns(f.showFacility())); // or f.getFacility()
+        }
+    }
+    
+    private static String leading(String row, int width) {
+        return row == null ? "" : row.substring(0, Math.min(width, row.length())).trim();
+    }
+    
+    private static String beforeTabOrEnd(String row) {
+        if (row == null) return "";
+        int i = row.indexOf('\t');
+        return i >= 0 ? row.substring(0, i).trim() : row.trim();
+    }
 
 	public static void main(String[] args) {
 		// TODO Auto-generated method stub
@@ -114,7 +193,6 @@ public class HospitalManagement extends Application{
 	@Override
 	public void start(Stage primaryStage) throws Exception {
 		// TODO Auto-generated method stub
-		initialize();
 		
 		// database
 		Db.bootstrap();
@@ -234,6 +312,8 @@ public class HospitalManagement extends Application{
 		Button addStaff = new Button("Add Staff");
 		Button showStaff = new Button("Show Staff");
 		Button returnTo1 = new Button("Return");
+		Button updateStaff = new Button("Update");
+		Button deleteStaff = new Button("Delete");
 		
 		addStaff.setPrefWidth(100);
 		showStaff.setPrefWidth(100);
@@ -241,6 +321,10 @@ public class HospitalManagement extends Application{
 		addStaff.setMinHeight(50);
 		showStaff.setMinHeight(50);
 		returnTo1.setMinHeight(50);
+		updateStaff.setPrefWidth(100);
+		deleteStaff.setPrefWidth(100);
+		updateStaff.setMinHeight(50);
+		deleteStaff.setMinHeight(50);
 		
 		Button addStaffTo = new Button("Add");
 		
@@ -275,7 +359,7 @@ public class HospitalManagement extends Application{
 		VBox staffV1 = new VBox();
 		VBox staffV2 = new VBox();
 		
-		staffV1.getChildren().addAll(addStaff, showStaff, returnTo1);
+		staffV1.getChildren().addAll(addStaff, showStaff, returnTo1, updateStaff, deleteStaff);
 		staffV1.setAlignment(Pos.BASELINE_CENTER);
 		staffV1.setSpacing(30);
 		staffV1.setBackground(new Background(new BackgroundFill(Color.BLACK, new CornerRadii(0), Insets.EMPTY)));
@@ -342,30 +426,171 @@ public class HospitalManagement extends Application{
 		    staffTf6.setText("New STAFF added successfully.");
 		    staffTf1.clear(); staffTf2.clear(); staffTf3.clear();
 		    staffTf4.clear(); staffTf5.clear();
+		    
+		    if (staffListView != null) refreshStaffList();
+
 		});
 
 		
 		showStaff.setOnAction(e -> {
-		    staffV2.getChildren().clear();
-
+			// At the start, reset selection
+			selectedPatientId = null;
+			
+		    // Header
 		    Label columnHeaderLabel = new Label("  ID        Name                 Designation         Sex     Salary");
 		    columnHeaderLabel.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
 
-		    ListView<String> staffListView = new ListView<>();
+		    // Use the class field (NOT a local variable)
+		    staffListView = new ListView<>();
 		    staffListView.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
 
+		    // Selection tracking (same as Patient: selecting a row sets the selected PK)
+		    staffListView.getSelectionModel().selectedItemProperty().addListener((obs, oldRow, row) -> {
+		        selectedStaffId = (row == null) ? null : leading(row, 10); // first column is width 10
+		    });
+		    
+		    // Populate list
 		    staffListView.getItems().clear();
-		    for (Staff s : staffRepo.findAll()) {
-		        String row = String.format("%-10s%-20s%-20s%-8s%8d",
-		                s.getId(), s.getName(), s.getDesignation(), s.getSex(), s.getSalary());
-		        staffListView.getItems().add(row);
-		    }
-
+		    staffListView.getSelectionModel().clearSelection();
+		    
 		    staffListView.setPlaceholder(new Label("No staff found."));
 		    staffListView.setPrefHeight(550);
 		    staffListView.setPrefWidth(700);
+		    
+		    refreshStaffList();
 
+		    staffV2.getChildren().clear();
 		    staffV2.getChildren().addAll(columnHeaderLabel, staffListView);
+		});
+		
+		updateStaff.setOnAction(e -> {
+		    staffTf6.setText("");
+
+		    // 1) Resolve selected ID (prefer selected row; fallback to typed field)
+		    String id = selectedStaffId;
+		    if ((id == null || id.isBlank()) && staffListView != null) {
+		        String sel = staffListView.getSelectionModel().getSelectedItem();
+		        if (sel != null) id = leading(sel, 10);
+		    }
+		    if (id == null || id.isBlank()) {
+		        staffTf6.setText("Select a staff in the list first.");
+		        return;
+		    }
+
+		    var opt = staffRepo.findById(id);
+		    if (opt.isEmpty()) {
+		        staffTf6.setText("Selected staff no longer exists.");
+		        // optional: if you're already on Show, refresh it
+		        if (staffListView != null) {
+		            staffListView.getItems().clear();
+		            for (Staff ss : staffRepo.findAll()) {
+		                String row = String.format("%-10s%-20s%-20s%-8s%8d",
+		                        ss.getId(), ss.getName(), ss.getDesignation(), ss.getSex(), ss.getSalary());
+		                staffListView.getItems().add(row);
+		            }
+		        }
+		        return;
+		    }
+		    Staff s = opt.get();
+
+		    // 2) Switch to Add view (reuse your existing builder)
+		    try { addStaff.fire(); } catch (Exception ignore) {}
+
+		    // 3) Pre-fill form with the selected record
+		    staffTf1.setText(s.getId());
+		    staffTf2.setText(s.getName() == null ? "" : s.getName());
+		    staffTf3.setText(s.getDesignation() == null ? "" : s.getDesignation());
+		    staffTf4.setText(s.getSex() == null ? "" : s.getSex());
+		    staffTf5.setText(String.valueOf(s.getSalary()));
+
+		    // 4) Lock PK and change main button to "Update Record"
+		    staffTf1.setEditable(false);
+		    addStaffTo.setText("Update Record");
+
+		    // 5) Swap handler (remember original to restore later)
+		    if (originalAddStaffHandler == null) {
+		        originalAddStaffHandler = addStaffTo.getOnAction();
+		    }
+
+		    final String selectedId = id; // effectively final for inner handler
+		    addStaffTo.setOnAction(ev -> {
+		        staffTf6.setText("");
+
+		        final String name = staffTf2.getText().trim();
+		        final String designation = staffTf3.getText().trim();
+		        final String sex = staffTf4.getText().trim();
+		        final String salaryStr = staffTf5.getText().trim();
+
+		        if (name.isEmpty() || designation.isEmpty() || sex.isEmpty() || salaryStr.isEmpty()) {
+		            staffTf6.setText("Please fill in all fields.");
+		            return;
+		        }
+
+		        final int salary;
+		        try {
+		            salary = Integer.parseInt(salaryStr);
+		            if (salary < 0) throw new NumberFormatException("negative");
+		        } catch (NumberFormatException ex) {
+		            staffTf6.setText("Salary must be a non-negative number.");
+		            return;
+		        }
+
+		        // 6) Persist update
+		        boolean ok = staffRepo.update(new Staff(selectedId, name, designation, sex, salary));
+		        staffTf6.setText(ok ? "Staff updated." : "Failed to update staff.");
+
+		        // 7) Restore Add mode & unlock PK
+		        addStaffTo.setText("Add");
+		        addStaffTo.setOnAction(originalAddStaffHandler);
+		        staffTf1.setEditable(true);
+
+		        // 8) Clear form fields
+		        staffTf1.clear(); staffTf2.clear(); staffTf3.clear(); staffTf4.clear(); staffTf5.clear();
+
+		        // 9) Return to Show + refresh list (like Patient)
+		        try { showStaff.fire(); } catch (Exception ignore) {}
+
+		        if (staffListView != null) {
+		            staffListView.getItems().clear();
+		            refreshStaffList();
+		        }
+
+		        // 10) Reset selection
+		        selectedStaffId = null;
+		    });
+		});
+
+		deleteStaff.setOnAction(e -> {
+		    staffTf6.setText("");
+
+		    String id = (selectedStaffId != null) ? selectedStaffId : staffTf1.getText().trim();
+		    if ((id == null || id.isEmpty()) && staffListView != null) {
+		        String sel = staffListView.getSelectionModel().getSelectedItem();
+		        if (sel != null) id = leading(sel, 10);
+		    }
+		    if (id == null || id.isEmpty()) { staffTf6.setText("Select a staff or enter an ID."); return; }
+		    if (staffRepo.findById(id).isEmpty()) { staffTf6.setText("No staff with this ID exists."); return; }
+
+		    if (!confirm("Delete Staff", "Are you sure you want to delete staff ID: " + id + "?")) return;
+
+		    boolean ok = staffRepo.delete(id);
+		    if (!ok) { staffTf6.setText("Failed to delete staff."); return; }
+
+		    staffTf6.setText("Staff deleted.");
+
+		    // Clear form fields
+		    staffTf1.clear(); staffTf2.clear(); staffTf3.clear(); staffTf4.clear(); staffTf5.clear();
+
+		    // Refresh list (if showing)
+		    if (staffListView != null) {
+		        staffListView.getItems().clear();
+		        refreshStaffList();
+		    }
+
+		    // Keep parity with Patient by returning to Show
+		    try { showStaff.fire(); } catch (Exception ignore) {}
+
+		    selectedStaffId = null;
 		});
 
 		
@@ -375,6 +600,8 @@ public class HospitalManagement extends Application{
 		Button addDoctor = new Button("Add Doctor");
 		Button showDoctor = new Button("Show Doctor");
 		Button returnTo2 = new Button("Return");
+		Button updateDoctor = new Button("Update");
+		Button deleteDoctor = new Button("Delete");
 		
 		addDoctor.setPrefWidth(100);
 		showDoctor.setPrefWidth(100);
@@ -382,6 +609,10 @@ public class HospitalManagement extends Application{
 		showDoctor.setMinHeight(50);
 		returnTo2.setPrefWidth(100);
 		returnTo2.setMinHeight(50);
+		updateDoctor.setPrefWidth(100);
+		updateDoctor.setMinHeight(50);
+		deleteDoctor.setPrefWidth(100);
+		deleteDoctor.setMinHeight(50);
 		
 		Button addDoctorTo = new Button("Add");
 		
@@ -416,7 +647,7 @@ public class HospitalManagement extends Application{
 		VBox doctorV1 = new VBox();
 		VBox doctorV2 = new VBox();
 		
-		doctorV1.getChildren().addAll(addDoctor, showDoctor, returnTo2);
+		doctorV1.getChildren().addAll(addDoctor, showDoctor, returnTo2, updateDoctor, deleteDoctor);
 		doctorV1.setAlignment(Pos.BASELINE_CENTER);
 		doctorV1.setSpacing(30);
 		doctorV1.setBackground(new Background(new BackgroundFill(Color.BLACK, new CornerRadii(0), Insets.EMPTY)));
@@ -485,38 +716,147 @@ public class HospitalManagement extends Application{
 		    doctorTf7.setText("New DOCTOR added successfully.");
 		    doctorTf1.clear(); doctorTf2.clear(); doctorTf3.clear();
 		    doctorTf4.clear(); doctorTf5.clear(); doctorTf6.clear();
+		    
+		    if (doctorListView != null) refreshDoctorList();
+
 		});
 
 		
 		showDoctor.setOnAction(e -> {
+			// reset selection view
+			selectedDoctorId = null;
+			
 		    doctorV2.getChildren().clear();
 
-		    // Monospace header so rows align
-		    Label columnHeaderLabel = new Label("  ID        Name                 Specialist           Work Time   Qualification     Room");
+		    Label columnHeaderLabel = new Label("  ID        Name                 Specialist            Work Time   Qualification        Room");
 		    columnHeaderLabel.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
 
-		    // List view in monospace as well
-		    ListView<String> doctorListView = new ListView<>();
+		    // Use the CLASS FIELD, not a local variable
+		    doctorListView = new ListView<>();
 		    doctorListView.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
-
-		    // Load from repository (DB) instead of the doctors[] array
-		    doctorListView.getItems().clear();
-		    for (Doctor d : doctorRepo.findAll()) {
-		        String row = String.format("%-10s%-20s%-22s%-12s%-18s%6d",
-		                d.getId(),
-		                d.getName(),
-		                d.getSpecialist(),
-		                d.getWorkTime(),
-		                d.getQualification(),
-		                d.getRoom());
-		        doctorListView.getItems().add(row);
-		    }
-
+		    doctorListView.setPlaceholder(new Label("No doctors found."));
 		    doctorListView.setPrefHeight(550);
-		    doctorListView.setPrefWidth(700); // wider to fit columns nicely
+		    doctorListView.setPrefWidth(700);
+
+		    // Populate
+		    doctorListView.getItems().clear();
+		    doctorListView.getSelectionModel().clearSelection();
+
+		    // Track selection (first column width = 10)
+		    doctorListView.getSelectionModel().selectedItemProperty().addListener((obs, oldRow, row) -> {
+		        selectedDoctorId = (row == null) ? null : leading(row, 10);
+		    });
+		    
+		    refreshDoctorList();
+
 		    doctorV2.getChildren().addAll(columnHeaderLabel, doctorListView);
 		});
 
+		updateDoctor.setOnAction(e -> {
+		    doctorTf7.setText("");
+
+		    // Resolve selected ID
+		    String id = selectedDoctorId;
+		    if ((id == null || id.isBlank()) && doctorListView != null) {
+		        String sel = doctorListView.getSelectionModel().getSelectedItem();
+		        if (sel != null) id = leading(sel, 10);
+		    }
+		    if (id == null || id.isBlank()) { doctorTf7.setText("Select a doctor in the list first."); return; }
+
+		    var opt = doctorRepo.findById(id);
+		    if (opt.isEmpty()) { doctorTf7.setText("Selected doctor no longer exists."); try { showDoctor.fire(); } catch (Exception ignore) {} return; }
+		    Doctor d = opt.get();
+
+		    // Switch to Add view
+		    try { addDoctor.fire(); } catch (Exception ignore) {}
+
+		    // Prefill
+		    doctorTf1.setText(d.getId());
+		    doctorTf2.setText(ns(d.getName()));
+		    doctorTf3.setText(ns(d.getSpecialist()));
+		    doctorTf4.setText(ns(d.getWorkTime()));
+		    doctorTf5.setText(ns(d.getQualification()));
+		    doctorTf6.setText(String.valueOf(d.getRoom()));
+
+		    // Lock PK, flip main button
+		    doctorTf1.setEditable(false);
+		    addDoctorTo.setText("Update Record");
+
+		    // Save original handler once
+		    if (originalAddDoctorHandler == null) originalAddDoctorHandler = addDoctorTo.getOnAction();
+
+		    final String selectedId = id;
+		    addDoctorTo.setOnAction(ev -> {
+		        doctorTf7.setText("");
+
+		        final String name = doctorTf2.getText().trim();
+		        final String specialist = doctorTf3.getText().trim();
+		        final String workTime = doctorTf4.getText().trim();
+		        final String qualification = doctorTf5.getText().trim();
+		        final String roomStr = doctorTf6.getText().trim();
+
+		        if (name.isEmpty() || specialist.isEmpty() || workTime.isEmpty() || qualification.isEmpty() || roomStr.isEmpty()) {
+		            doctorTf7.setText("Please fill in all fields.");
+		            return;
+		        }
+		        final int room;
+		        try { room = Integer.parseInt(roomStr); if (room < 0) throw new NumberFormatException(); }
+		        catch (NumberFormatException ex) { doctorTf7.setText("Room must be a non-negative number."); return; }
+
+		        boolean ok = doctorRepo.update(new Doctor(selectedId, name, specialist, workTime, qualification, room));
+		        doctorTf7.setText(ok ? "Doctor updated." : "Failed to update doctor.");
+
+		        // Restore Add mode
+		        addDoctorTo.setText("Add");
+		        addDoctorTo.setOnAction(originalAddDoctorHandler);
+		        doctorTf1.setEditable(true);
+
+		        // Clear
+		        doctorTf1.clear(); doctorTf2.clear(); doctorTf3.clear(); doctorTf4.clear(); doctorTf5.clear(); doctorTf6.clear();
+
+		        // Refresh list
+		        try { showDoctor.fire(); } catch (Exception ignore) {}
+		        if (doctorListView != null) {
+		            doctorListView.getItems().clear();
+		            refreshDoctorList();
+		        }
+
+		        selectedDoctorId = null;
+		    });
+		});
+		
+		deleteDoctor.setOnAction(e -> {
+		    doctorTf7.setText("");
+
+		    // Resolve ID: tracked selection → text field → list selection (first 10 chars)
+		    String id = (selectedDoctorId != null) ? selectedDoctorId : doctorTf1.getText().trim();
+		    if (id.isEmpty() && doctorListView != null) {
+		        String sel = doctorListView.getSelectionModel().getSelectedItem();
+		        if (sel != null) id = sel.substring(0, Math.min(10, sel.length())).trim();
+		    }
+
+		    if (id.isEmpty()) { doctorTf7.setText("Select a doctor or enter an ID."); return; }
+		    if (doctorRepo.findById(id).isEmpty()) { doctorTf7.setText("No doctor with this ID exists."); return; }
+		    if (!confirm("Delete Doctor", "Delete doctor " + id + "?")) return;
+
+		    boolean ok = doctorRepo.delete(id); // use deleteById(id) if your repo uses that name
+		    if (!ok) { doctorTf7.setText("Failed to delete doctor."); return; }
+
+		    doctorTf7.setText("Doctor deleted.");
+
+		    // Clear form and selection; unlock ID for new entries
+		    doctorTf1.clear(); doctorTf2.clear(); doctorTf3.clear();
+		    doctorTf4.clear(); doctorTf5.clear(); doctorTf6.clear();
+		    doctorTf1.setEditable(true);
+		    selectedDoctorId = null;
+
+		    // Refresh list
+		    if (doctorListView != null) {
+		        doctorListView.getSelectionModel().clearSelection();
+		        doctorListView.getItems().clear();
+		        refreshDoctorList();
+		    }
+		});
 		
 		// ----------------------------------------------------------------------------------
 		// Patient Menu
@@ -525,6 +865,9 @@ public class HospitalManagement extends Application{
 		Button addPatient = new Button("Add Patient");
 		Button showPatient = new Button("Show Patient");
 		Button returnTo3 = new Button("Return");
+		Button updatePatient = new Button("Update");
+		Button deletePatient = new Button("Delete");
+
 		
 		addPatient.setPrefWidth(100);
 		showPatient.setPrefWidth(100);
@@ -532,6 +875,10 @@ public class HospitalManagement extends Application{
 		showPatient.setMinHeight(50);
 		returnTo3.setPrefWidth(100);
 		returnTo3.setMinHeight(50);
+		updatePatient.setPrefWidth(100);
+		updatePatient.setMinHeight(50);
+		deletePatient.setPrefWidth(100);
+		deletePatient.setMinHeight(50);
 		
 		Button addPatientTo = new Button("Add");
 		
@@ -567,7 +914,7 @@ public class HospitalManagement extends Application{
 		VBox patientV1 = new VBox();
 		VBox patientV2 = new VBox();
 		
-		patientV1.getChildren().addAll(addPatient, showPatient, returnTo3);
+		patientV1.getChildren().addAll(addPatient, showPatient, returnTo3, updatePatient, deletePatient);
 		patientV1.setAlignment(Pos.BASELINE_CENTER);
 		patientV1.setSpacing(30);
 		patientV1.setBackground(new Background(new BackgroundFill(Color.BLACK, new CornerRadii(0), Insets.EMPTY)));
@@ -589,6 +936,14 @@ public class HospitalManagement extends Application{
 		
 		// Doctor Button Functions 
 		addPatient.setOnAction(e -> {
+			// Whenever user explicitly opens the Add Patient form, ensure the button is in normal Add mode
+			if (originalAddPatientHandler != null) {
+			    addPatientTo.setText("Add");
+			    addPatientTo.setOnAction(originalAddPatientHandler);
+			}
+			patientTf1.setEditable(true);
+			patientTf7.setText("");
+			
 			patientV2.getChildren().clear();
 			patientV2.getChildren().addAll(
 					new Label("ID: "),patientTf1, 
@@ -640,40 +995,177 @@ public class HospitalManagement extends Application{
 		    patientTf7.setText("New PATIENT added successfully.");
 		    patientTf1.clear(); patientTf2.clear(); patientTf3.clear();
 		    patientTf4.clear(); patientTf5.clear(); patientTf6.clear();
+		    
+		    if (patientListView != null) refreshPatientList();
 		});
 
 			
 		showPatient.setOnAction(e -> {
+			// reset List view
+			selectedPatientId = null;
+			
 		    patientV2.getChildren().clear();
 
-		    // Monospace header so columns line up
-		    Label columnHeaderLabel = new Label("  ID        Name                 Disease             Sex    Admit Status      Age");
-		    columnHeaderLabel.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
+		    Label patientHeader = new Label("  ID        Name                 Disease             Sex    Admit Status      Age");
+		    patientHeader.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
 
-		    ListView<String> patientListView = new ListView<>();
+		    patientListView = new ListView<>();
 		    patientListView.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
-
-		    // Load from repository (DB)
-		    patientListView.getItems().clear();
-		    for (Patient p : patientRepo.findAll()) {
-		        String row = String.format("%-10s%-20s%-22s%-8s%-18s%5d",
-		                ns(p.getId()),
-		                ns(p.getName()),
-		                ns(p.getDisease()),
-		                ns(p.getSex()),
-		                ns(p.getAdmitStatus()),
-		                p.getAge());
-		        patientListView.getItems().add(row);
-		    }
-
 		    patientListView.setPlaceholder(new Label("No patients found."));
 		    patientListView.setPrefHeight(550);
-		    patientListView.setPrefWidth(700); // wider so all columns fit
+		    patientListView.setPrefWidth(700);
 
-		    patientV2.getChildren().addAll(columnHeaderLabel, patientListView);
+		    // Capture the selected patient's ID (first column)
+		    patientListView.getSelectionModel().selectedItemProperty().addListener((obs, oldSel, sel) -> {
+		        if (sel == null) { selectedPatientId = null; return; }
+		        selectedPatientId = sel.substring(0, Math.min(10, sel.length())).trim();
+		    });
+		    
+		    refreshPatientList();
+		    patientListView.getSelectionModel().clearSelection();
+
+		    patientV2.getChildren().addAll(patientHeader, patientListView);
 		});
+		
+		updatePatient.setOnAction(e -> {
+		    patientTf7.setText("");
 
-				
+		    // 1) make sure a row is selected
+		    String id = selectedPatientId;
+		    if ((id == null || id.isBlank()) && patientListView != null) {
+		        String sel = patientListView.getSelectionModel().getSelectedItem();
+		        if (sel != null) id = sel.substring(0, Math.min(10, sel.length())).trim();
+		    }
+		    if (id == null || id.isBlank()) {
+		        patientTf7.setText("Select a patient in the list first.");
+		        return;
+		    }
+
+		    var opt = patientRepo.findById(id);
+		    if (opt.isEmpty()) {
+		        patientTf7.setText("Selected patient no longer exists.");
+		        refreshPatientList();
+		        return;
+		    }
+
+		    // 2) switch to the Add Patient view (reuse your existing builder)
+		    addPatient.fire();
+
+		    // 3) prefill form, lock ID, and convert Add button into "Update Record"
+		    javafx.application.Platform.runLater(() -> {
+		        Patient p = opt.get();
+		        selectedPatientId = p.getId();          // lock the PK we'll update
+
+		        // prefill
+		        patientTf1.setText(p.getId());
+		        patientTf2.setText(p.getName());
+		        patientTf3.setText(p.getDisease());
+		        patientTf4.setText(p.getSex());
+		        patientTf5.setText(p.getAdmitStatus());
+		        patientTf6.setText(Integer.toString(p.getAge()));
+
+		        // lock PK
+		        patientTf1.setEditable(false);
+
+		        // change button label
+		        addPatientTo.setText("Update Record");
+
+		        // store original handler (once) and replace with update handler
+		        if (originalAddPatientHandler == null) {
+		            originalAddPatientHandler = addPatientTo.getOnAction();
+		        }
+
+		        addPatientTo.setOnAction(ev -> {
+		            patientTf7.setText("");
+
+		            // validate
+		            final String name = patientTf2.getText().trim();
+		            final String disease = patientTf3.getText().trim();
+		            final String sex = patientTf4.getText().trim();
+		            final String admit = patientTf5.getText().trim();
+		            final String ageStr = patientTf6.getText().trim();
+
+		            if (name.isEmpty() || disease.isEmpty() || sex.isEmpty() || admit.isEmpty() || ageStr.isEmpty()) {
+		                patientTf7.setText("Please fill in all fields.");
+		                return;
+		            }
+		            final int age;
+		            try { age = Integer.parseInt(ageStr); if (age < 0) throw new NumberFormatException(); }
+		            catch (NumberFormatException ex) { patientTf7.setText("Age must be a non-negative number."); return; }
+
+		            // ensure record still exists
+		            if (patientRepo.findById(selectedPatientId).isEmpty()) {
+		                patientTf7.setText("The patient you were editing no longer exists.");
+		                // restore button and go back to list
+		                addPatientTo.setText("Add");
+		                addPatientTo.setOnAction(originalAddPatientHandler);
+		                patientTf1.setEditable(true);
+		                showPatient.fire();
+		                return;
+		            }
+
+		            boolean ok = patientRepo.update(new Patient(selectedPatientId, name, disease, sex, admit, age));
+		            if (!ok) {
+		                patientTf7.setText("Failed to update patient.");
+		                return;
+		            }
+
+		            // success
+		            patientTf7.setText("Patient record updated successfully.");
+
+		            // restore Add button behavior
+		            addPatientTo.setText("Add");
+		            addPatientTo.setOnAction(originalAddPatientHandler);
+		            patientTf1.setEditable(true);
+
+		            // clear form
+		            patientTf1.clear(); patientTf2.clear(); patientTf3.clear();
+		            patientTf4.clear(); patientTf5.clear(); patientTf6.clear();
+
+		            // 4) switch back to Show and refresh list
+		            showPatient.fire();            // navigates back to list
+		            // refresh happens in Show; keep this for safety if Show is already visible
+		            refreshPatientList();
+
+		            // reset selection lock
+		            selectedPatientId = null;
+		        });
+		    });
+		});
+		
+		deletePatient.setOnAction(e -> {
+		    patientTf7.setText("");
+
+		    String id = (selectedPatientId != null) ? selectedPatientId : patientTf1.getText().trim();
+		    if (id.isEmpty() && patientListView != null) {
+		        String sel = patientListView.getSelectionModel().getSelectedItem();
+		        if (sel != null) id = sel.substring(0, Math.min(10, sel.length())).trim();
+		    }
+		    if (id.isEmpty()) { patientTf7.setText("Select a patient or enter an ID."); return; }
+		    if (patientRepo.findById(id).isEmpty()) { patientTf7.setText("No patient with this ID exists."); return; }
+		    if (!confirm("Delete Patient", "Delete patient " + id + "?")) return;
+
+		    boolean ok = patientRepo.delete(id);
+		    if (!ok) {
+		        patientTf7.setText("Failed to delete patient.");
+		        return;
+		    }
+
+		    patientTf7.setText("Patient deleted.");
+
+		    // Clear form and selection; unlock ID for new entries
+		    patientTf1.clear(); patientTf2.clear(); patientTf3.clear();
+		    patientTf4.clear(); patientTf5.clear(); patientTf6.clear();
+		    patientTf1.setEditable(true);
+		    selectedPatientId = null;
+
+		    if (patientListView != null) {
+		        patientListView.getSelectionModel().clearSelection();
+		        patientListView.getItems().clear();
+		        refreshPatientList();
+		    }
+		});
+	
 		// ----------------------------------------------------------------------------------
 		// Medical menu
 		
@@ -681,6 +1173,8 @@ public class HospitalManagement extends Application{
 		Button addMedical = new Button("Add Medical");
 		Button showMedical = new Button("Show Medical");
 		Button returnTo4 = new Button("Return");
+		Button updateMedical = new Button("Update");
+		Button deleteMedical = new Button("Delete");
 		
 		addMedical.setPrefWidth(100);
 		showMedical.setPrefWidth(100);
@@ -688,6 +1182,10 @@ public class HospitalManagement extends Application{
 		showMedical.setMinHeight(50);
 		returnTo4.setPrefWidth(100);
 		returnTo4.setMinHeight(50);
+		updateMedical.setPrefWidth(100);
+		deleteMedical.setPrefWidth(100);
+		updateMedical.setMinHeight(50);
+		deleteMedical.setMinHeight(50);
 		
 		Button addMedicalTo = new Button("Add");
 		
@@ -722,7 +1220,7 @@ public class HospitalManagement extends Application{
 		VBox medicalV1 = new VBox();
 		VBox medicalV2 = new VBox();
 		
-		medicalV1.getChildren().addAll(addMedical, showMedical, returnTo4);
+		medicalV1.getChildren().addAll(addMedical, showMedical, returnTo4, updateMedical, deleteMedical);
 		medicalV1.setAlignment(Pos.BASELINE_CENTER);
 		medicalV1.setSpacing(30);
 		medicalV1.setBackground(new Background(new BackgroundFill(Color.BLACK, new CornerRadii(0), Insets.EMPTY)));
@@ -796,33 +1294,139 @@ public class HospitalManagement extends Application{
 		    medicalTf6.setText("New MEDICAL added successfully.");
 		    medicalTf1.clear(); medicalTf2.clear(); medicalTf3.clear();
 		    medicalTf4.clear(); medicalTf5.clear();
+		    
+		    if (medicalListView != null) refreshMedicalList();
+
 		});
 		
 		showMedical.setOnAction(e -> {
 		    medicalV2.getChildren().clear();
 
-		    Label columnHeaderLabel = new Label("  Name                 Manufacturer         Expiry       Cost   Count");
+		    Label columnHeaderLabel = new Label("  Name                   Manufacturer          Expiry         Cost  Count");
 		    columnHeaderLabel.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
 
-		    ListView<String> medicalListView = new ListView<>();
+		    // Use CLASS FIELD
+		    medicalListView = new ListView<>();
 		    medicalListView.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
-
-		    medicalListView.getItems().clear();
-		    for (Medical m : medicalRepo.findAll()) {
-		        String row = String.format("%-22s%-22s%-13s%7d%7d",
-		                ns(m.getName()),
-		                ns(m.getManufacturer()),
-		                ns(m.getExpiryDate()),
-		                m.getCost(),
-		                m.getCount());
-		        medicalListView.getItems().add(row);
-		    }
-
 		    medicalListView.setPlaceholder(new Label("No medicines found."));
 		    medicalListView.setPrefHeight(550);
 		    medicalListView.setPrefWidth(700);
 
+		    medicalListView.getItems().clear();
+
+		    // Track selection (first column width = 22)
+		    medicalListView.getSelectionModel().selectedItemProperty().addListener((obs, oldRow, row) -> {
+		        selectedMedicalName = (row == null) ? null : leading(row, 22);
+		    });
+		    
+		    refreshMedicalList();
+
 		    medicalV2.getChildren().addAll(columnHeaderLabel, medicalListView);
+		});
+
+		updateMedical.setOnAction(e -> {
+		    medicalTf6.setText("");
+
+		    // Resolve selected name
+		    String name = selectedMedicalName;
+		    if ((name == null || name.isBlank()) && medicalListView != null) {
+		        String sel = medicalListView.getSelectionModel().getSelectedItem();
+		        if (sel != null) name = leading(sel, 22);
+		    }
+		    if (name == null || name.isBlank()) { medicalTf6.setText("Select a medicine in the list first."); return; }
+
+		    var opt = medicalRepo.findByName(name);
+		    if (opt.isEmpty()) { medicalTf6.setText("Selected medicine no longer exists."); try { showMedical.fire(); } catch (Exception ignore) {} return; }
+		    Medical m = opt.get();
+
+		    // Switch to Add view
+		    try { addMedical.fire(); } catch (Exception ignore) {}
+
+		    // Prefill
+		    medicalTf1.setText(ns(m.getName()));
+		    medicalTf2.setText(ns(m.getManufacturer()));
+		    medicalTf3.setText(ns(m.getExpiryDate()));
+		    medicalTf4.setText(String.valueOf(m.getCost()));
+		    medicalTf5.setText(String.valueOf(m.getCount()));
+
+		    // Lock PK, flip button
+		    medicalTf1.setEditable(false);
+		    addMedicalTo.setText("Update Record");
+
+		    if (originalAddMedicalHandler == null) originalAddMedicalHandler = addMedicalTo.getOnAction();
+
+		    final String selectedName = name;
+		    addMedicalTo.setOnAction(ev -> {
+		        medicalTf6.setText("");
+
+		        final String manufacturer = medicalTf2.getText().trim();
+		        final String expiry = medicalTf3.getText().trim();
+		        final String costStr = medicalTf4.getText().trim();
+		        final String countStr = medicalTf5.getText().trim();
+
+		        if (manufacturer.isEmpty() || expiry.isEmpty() || costStr.isEmpty() || countStr.isEmpty()) {
+		            medicalTf6.setText("Please fill in all fields.");
+		            return;
+		        }
+		        if (!expiry.matches("\\d{4}-\\d{2}-\\d{2}")) {
+		            medicalTf6.setText("Expiry must be YYYY-MM-DD.");
+		            return;
+		        }
+		        final int cost, count;
+		        try { cost = Integer.parseInt(costStr); count = Integer.parseInt(countStr); if (cost < 0 || count < 0) throw new NumberFormatException(); }
+		        catch (NumberFormatException ex) { medicalTf6.setText("Cost and Count must be non-negative numbers."); return; }
+
+		        boolean ok = medicalRepo.update(new Medical(selectedName, manufacturer, expiry, cost, count));
+		        medicalTf6.setText(ok ? "Medicine updated." : "Failed to update medicine.");
+
+		        // Restore Add mode
+		        addMedicalTo.setText("Add");
+		        addMedicalTo.setOnAction(originalAddMedicalHandler);
+		        medicalTf1.setEditable(true);
+
+		        // Clear
+		        medicalTf1.clear(); medicalTf2.clear(); medicalTf3.clear(); medicalTf4.clear(); medicalTf5.clear();
+
+		        // Refresh list
+		        try { showMedical.fire(); } catch (Exception ignore) {}
+		        if (medicalListView != null) {
+		            medicalListView.getItems().clear();
+		            refreshMedicalList();
+		        }
+
+		        selectedMedicalName = null;
+		    });
+		});
+
+		deleteMedical.setOnAction(e -> {
+		    medicalTf6.setText("");
+
+		    // Resolve name: tracked selection → text field → list selection (first 22 chars)
+		    String name = (selectedMedicalName != null) ? selectedMedicalName : medicalTf1.getText().trim();
+		    if (name.isEmpty() && medicalListView != null) {
+		        String sel = medicalListView.getSelectionModel().getSelectedItem();
+		        if (sel != null) name = sel.substring(0, Math.min(22, sel.length())).trim();
+		    }
+
+		    if (name.isEmpty()) { medicalTf6.setText("Select a medicine or enter a name."); return; }
+		    if (medicalRepo.findByName(name).isEmpty()) { medicalTf6.setText("No medicine with this name exists."); return; }
+		    if (!confirm("Delete Medicine", "Delete medicine '" + name + "'?")) return;
+
+		    boolean ok = medicalRepo.delete(name);
+		    if (!ok) { medicalTf6.setText("Failed to delete medicine."); return; }
+
+		    medicalTf6.setText("Medicine deleted.");
+
+		    // Clear form and selection; unlock for new entries
+		    medicalTf1.clear(); medicalTf2.clear(); medicalTf3.clear(); medicalTf4.clear(); medicalTf5.clear();
+		    selectedMedicalName = null;
+
+		    // Refresh list
+		    if (medicalListView != null) {
+		        medicalListView.getSelectionModel().clearSelection();
+		        medicalListView.getItems().clear();
+		        refreshMedicalList();
+		    }
 		});
 		
 		// ----------------------------------------------------------------------------------
@@ -831,6 +1435,8 @@ public class HospitalManagement extends Application{
 		Button addLab = new Button("Add Lab");
 		Button showLab = new Button("Show Lab");
 		Button returnTo5 = new Button("Return");
+		Button updateLab = new Button("Update");
+		Button deleteLab = new Button("Delete");
 		
 		addLab.setPrefWidth(100);
 		showLab.setPrefWidth(100);
@@ -838,6 +1444,10 @@ public class HospitalManagement extends Application{
 		showLab.setMinHeight(50);
 		returnTo5.setPrefWidth(100);
 		returnTo5.setMinHeight(50);
+		updateLab.setPrefWidth(100);
+		deleteLab.setPrefWidth(100);
+		updateLab.setMinHeight(50);
+		deleteLab.setMinHeight(50);
 		
 		Button addLabTo = new Button("Add");
 		
@@ -869,7 +1479,7 @@ public class HospitalManagement extends Application{
 		VBox labV1 = new VBox();
 		VBox labV2 = new VBox();
 		
-		labV1.getChildren().addAll(addLab, showLab, returnTo5);
+		labV1.getChildren().addAll(addLab, showLab, returnTo5, updateLab, deleteLab);
 		labV1.setAlignment(Pos.BASELINE_CENTER);
 		labV1.setSpacing(30);
 		labV1.setBackground(new Background(new BackgroundFill(Color.BLACK, new CornerRadii(0), Insets.EMPTY)));
@@ -929,31 +1539,143 @@ public class HospitalManagement extends Application{
 
 		    labTf3.setText("New LAB added successfully.");
 		    labTf1.clear(); labTf2.clear();
+		    
+		    if (labListView != null) refreshLabList();
+
 		});
 
 		showLab.setOnAction(e -> {
 		    labV2.getChildren().clear();
 
-		    Label columnHeaderLabel = new Label("  Lab/Test Name              Cost");
+		    Label columnHeaderLabel = new Label("  Lab/Test Name                 Cost");
 		    columnHeaderLabel.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
 
-		    ListView<String> labListView = new ListView<>();
+		    // Class field (not local)
+		    labListView = new ListView<>();
 		    labListView.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
-
-		    labListView.getItems().clear();
-		    for (Lab l : labRepo.findAll()) {
-		        String row = String.format("%-28s%8d",
-		                (l.getLab() == null ? "" : l.getLab()),
-		                l.getCost());
-		        labListView.getItems().add(row);
-		    }
-
 		    labListView.setPlaceholder(new Label("No labs/tests found."));
 		    labListView.setPrefHeight(550);
 		    labListView.setPrefWidth(500);
 
+		    // Reset stale selection + status
+		    selectedLabName = null;
+		    labTf3.setText("");
+
+		    // Track selection (first column width = 28)
+		    labListView.getSelectionModel().selectedItemProperty().addListener((obs, oldRow, row) -> {
+		        selectedLabName = (row == null) ? null : leading(row, 28);
+		    });
+
+		    // Populate deterministically (sorted)
+		    refreshLabList();
+		    labListView.getSelectionModel().clearSelection();
+
 		    labV2.getChildren().addAll(columnHeaderLabel, labListView);
 		});
+
+		
+		updateLab.setOnAction(e -> {
+		    labTf3.setText("");
+
+		    // Resolve 'name' (can be reassigned during resolution)
+		    String name = selectedLabName;
+		    if ((name == null || name.isBlank()) && labListView != null) {
+		        String sel = labListView.getSelectionModel().getSelectedItem();
+		        if (sel != null) name = leading(sel, 28);
+		    }
+		    if (name == null || name.isBlank()) {
+		        labTf3.setText("Select a lab/test in the list first.");
+		        return;
+		    }
+
+		    var opt = labRepo.findByName(name);
+		    if (opt.isEmpty()) {
+		        labTf3.setText("Selected lab/test no longer exists.");
+		        try { showLab.fire(); } catch (Exception ignore) {}
+		        return;
+		    }
+		    Lab l = opt.get();
+
+		    // ✅ Make a FINAL copy BEFORE any lambda references it
+		    final String resolvedName = name;
+
+		    // Switch to Add view
+		    try { addLab.fire(); } catch (Exception ignore) {}
+
+		    // Prefill after UI is rebuilt
+		    Platform.runLater(() -> {
+		        labTf1.setText(ns(l.getLab()));
+		        labTf2.setText(String.valueOf(l.getCost()));
+
+		        labTf1.setEditable(false);
+		        addLabTo.setText("Update Record");
+
+		        if (originalAddLabHandler == null) originalAddLabHandler = addLabTo.getOnAction();
+
+		        addLabTo.setOnAction(ev -> {
+		            labTf3.setText("");
+
+		            final String costStr = labTf2.getText().trim();
+		            if (costStr.isEmpty()) {
+		                labTf3.setText("Please fill in all fields.");
+		                return;
+		            }
+
+		            final int cost;
+		            try {
+		                cost = Integer.parseInt(costStr);
+		                if (cost < 0) throw new NumberFormatException();
+		            } catch (NumberFormatException ex) {
+		                labTf3.setText("Cost must be a non-negative number.");
+		                return;
+		            }
+
+		            boolean ok = labRepo.update(new Lab(resolvedName, cost)); // <-- use FINAL copy
+		            labTf3.setText(ok ? "Lab updated." : "Failed to update lab.");
+
+		            // Restore Add mode
+		            addLabTo.setText("Add");
+		            addLabTo.setOnAction(originalAddLabHandler);
+		            labTf1.setEditable(true);
+
+		            // Clear & refresh
+		            labTf1.clear(); labTf2.clear();
+		            if (labListView != null) {
+		                refreshLabList();
+		                labListView.getSelectionModel().clearSelection();
+		            }
+		            selectedLabName = null;
+		        });
+		    });
+		});
+		
+		deleteLab.setOnAction(e -> {
+		    labTf3.setText("");
+
+		    // Resolve name: tracked selection → text field → list selection (first 28 chars)
+		    String name = (selectedLabName != null) ? selectedLabName : labTf1.getText().trim();
+		    if (name.isEmpty() && labListView != null) {
+		        String sel = labListView.getSelectionModel().getSelectedItem();
+		        if (sel != null) name = leading(sel, 28);
+		    }
+
+		    if (name.isEmpty()) { labTf3.setText("Select a lab/test or enter a name."); return; }
+		    if (labRepo.findByName(name).isEmpty()) { labTf3.setText("No lab/test with this name exists."); return; }
+		    if (!confirm("Delete Lab/Test", "Delete lab/test '" + name + "'?")) return;
+
+		    boolean ok = labRepo.delete(name);
+		    if (!ok) { labTf3.setText("Failed to delete lab."); return; }
+
+		    labTf3.setText("Lab deleted.");
+		    labTf1.clear(); labTf2.clear();
+		    selectedLabName = null;
+
+		    if (labListView != null) {
+		        refreshLabList();
+		        labListView.getSelectionModel().clearSelection();
+		    }
+		});
+
 	
 		// ----------------------------------------------------------------------------------
 		// Facility menu
@@ -961,6 +1683,8 @@ public class HospitalManagement extends Application{
 		Button addFacility = new Button("Add Facility");
 		Button showFacility = new Button("Show Facility");
 		Button returnTo6 = new Button("Return");
+		Button updateFacility = new Button("Update");
+		Button deleteFacility = new Button("Delete");
 		
 		addFacility.setPrefWidth(100);
 		showFacility.setPrefWidth(100);
@@ -968,6 +1692,10 @@ public class HospitalManagement extends Application{
 		showFacility.setMinHeight(50);
 		returnTo6.setPrefWidth(100);
 		returnTo6.setMinHeight(50);
+		updateFacility.setPrefWidth(100);
+		deleteFacility.setPrefWidth(100);
+		updateFacility.setMinHeight(50);
+		deleteFacility.setMinHeight(50);
 		
 		Button addFacilityTo = new Button("Add");
 		
@@ -998,7 +1726,7 @@ public class HospitalManagement extends Application{
 		VBox facilityV1 = new VBox();
 		VBox facilityV2 = new VBox();
 		
-		facilityV1.getChildren().addAll(addFacility, showFacility, returnTo6);
+		facilityV1.getChildren().addAll(addFacility, showFacility, returnTo6, updateFacility, deleteFacility);
 		facilityV1.setAlignment(Pos.BASELINE_CENTER);
 		facilityV1.setSpacing(30);
 		facilityV1.setBackground(new Background(new BackgroundFill(Color.BLACK, new CornerRadii(0), Insets.EMPTY)));
@@ -1047,6 +1775,9 @@ public class HospitalManagement extends Application{
 
 		    facilityTf2.setText("New FACILITY added successfully.");
 		    facilityTf1.clear();
+		    
+		    if (facilityListView != null) refreshFacilityList();
+
 		});
 	
 		showFacility.setOnAction(e -> {
@@ -1055,20 +1786,143 @@ public class HospitalManagement extends Application{
 		    Label columnHeaderLabel = new Label("  Facility Name");
 		    columnHeaderLabel.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
 
-		    ListView<String> facilityListView = new ListView<>();
+		    // Use CLASS FIELD
+		    facilityListView = new ListView<>();
 		    facilityListView.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12;");
-
-		    facilityListView.getItems().clear();
-		    for (Facility f : facilityRepo.findAll()) {
-		        facilityListView.getItems().add(f.showFacility()); // or f.getFacility()
-		    }
-
 		    facilityListView.setPlaceholder(new Label("No facilities found."));
 		    facilityListView.setPrefHeight(550);
 		    facilityListView.setPrefWidth(500);
 
+		    facilityListView.getItems().clear();
+//		    for (Facility f : facilityRepo.findAll()) {
+//		        facilityListView.getItems().add(ns(f.showFacility())); // f.getFacility() if you prefer
+//		    }
+
+		    // Track selection (single column; whole row is the name)
+		    facilityListView.getSelectionModel().selectedItemProperty().addListener((obs, oldRow, row) -> {
+		        selectedFacilityName = (row == null) ? null : row.trim();
+		    });
+		    
+		    refreshFacilityList();
+
 		    facilityV2.getChildren().addAll(columnHeaderLabel, facilityListView);
 		});
+		
+		updateFacility.setOnAction(e -> {
+		    facilityTf2.setText("");
+
+		    // Resolve selected facility name
+		    String name = selectedFacilityName;
+		    if ((name == null || name.isBlank()) && facilityListView != null) {
+		        String sel = facilityListView.getSelectionModel().getSelectedItem();
+		        if (sel != null) name = sel.trim();
+		    }
+		    if (name == null || name.isBlank()) {
+		        facilityTf2.setText("Select a facility in the list first.");
+		        return;
+		    }
+
+		    var opt = facilityRepo.findByName(name);
+		    if (opt.isEmpty()) {
+		        facilityTf2.setText("Selected facility no longer exists.");
+		        try { showFacility.fire(); } catch (Exception ignore) {}
+		        return;
+		    }
+		    Facility f = opt.get();
+
+		    // ✅ FINAL copy BEFORE lambda
+		    final String oldName = name;
+
+		    // Switch to Add view
+		    try { addFacility.fire(); } catch (Exception ignore) {}
+
+		    // Prefill (ALLOW EDIT so rename is possible)
+		    facilityTf1.setText(ns(f.showFacility())); // or f.getFacility()
+		    facilityTf1.setEditable(true);
+
+		    addFacilityTo.setText("Update Record");
+		    if (originalAddFacilityHandler == null) originalAddFacilityHandler = addFacilityTo.getOnAction();
+
+		    addFacilityTo.setOnAction(ev -> {
+		        facilityTf2.setText("");
+
+		        String newName = facilityTf1.getText().trim();
+		        if (newName.isEmpty()) {
+		            facilityTf2.setText("Facility name cannot be empty.");
+		            return;
+		        }
+		        if (!newName.equals(oldName) && facilityRepo.findByName(newName).isPresent()) {
+		            facilityTf2.setText("This facility already exists.");
+		            return;
+		        }
+
+		        // Persist: if no direct update, do delete+insert
+		        boolean ok = newName.equals(oldName)
+		                ? true
+		                : (facilityRepo.delete(oldName) && facilityRepo.insert(new Facility(newName)));
+
+		        facilityTf2.setText(ok ? "Facility updated." : "Failed to update facility.");
+
+		        // Restore Add mode
+		        addFacilityTo.setText("Add");
+		        addFacilityTo.setOnAction(originalAddFacilityHandler);
+		        facilityTf1.setEditable(true);
+
+		        // Clear & refresh
+		        facilityTf1.clear();
+		        if (facilityListView != null) {
+		            refreshFacilityList();
+		            facilityListView.getSelectionModel().clearSelection();
+		        }
+		        selectedFacilityName = null;
+		    });
+		});
+		
+		deleteFacility.setOnAction(e -> {
+		    facilityTf2.setText("");
+
+		    // 1) Resolve the facility name (selection → text field → list fallback)
+		    String name = (selectedFacilityName != null) ? selectedFacilityName : facilityTf1.getText().trim();
+		    if (name.isEmpty() && facilityListView != null) {
+		        String sel = facilityListView.getSelectionModel().getSelectedItem();
+		        if (sel != null) name = sel.trim();
+		    }
+
+		    if (name.isEmpty()) { facilityTf2.setText("Select a facility or enter a name."); return; }
+		    if (facilityRepo.findByName(name).isEmpty()) { facilityTf2.setText("No facility with this name exists."); return; }
+
+		    // 2) Confirm
+		    if (!confirm("Delete Facility", "Delete facility '" + name + "'?")) return;
+
+		    // 3) Delete (repo method name may differ; pick the one you have)
+		    boolean ok;
+		    try {
+		        ok = facilityRepo.delete(name);        // or: ok = facilityRepo.deleteByName(name);
+		    } catch (Exception ex) {
+		        ok = false;
+		    }
+		    if (!ok) { facilityTf2.setText("Failed to delete facility."); return; }
+
+		    facilityTf2.setText("Facility deleted.");
+
+		    // 4) If we were in Update mode, restore Add mode and unlock field
+		    if ("Update Record".equals(addFacilityTo.getText())) {
+		        addFacilityTo.setText("Add");
+		        if (originalAddFacilityHandler != null) addFacilityTo.setOnAction(originalAddFacilityHandler);
+		        facilityTf1.setEditable(true);
+		    }
+
+		    // 5) Clear form + selection
+		    facilityTf1.clear();
+		    selectedFacilityName = null;
+
+		    // 6) Refresh the list deterministically (sorted)
+		    if (facilityListView != null) {
+		        refreshFacilityList();
+		        facilityListView.getSelectionModel().clearSelection();
+		    }
+		});
+
 	
 		// ----------------------------------------------------------------------------------
 		// Button functions
@@ -1098,8 +1952,8 @@ public class HospitalManagement extends Application{
 		});
 		
 		mainBt6.setOnAction(e -> {
-			primaryStage.setTitle("Lab Menu");
-			primaryStage.setScene(facilityScene);
+		    primaryStage.setTitle("Facility Menu");
+		    primaryStage.setScene(facilityScene);
 		});
 	
 		returnTo1.setOnAction(e -> {
