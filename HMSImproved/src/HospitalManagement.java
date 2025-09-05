@@ -1,13 +1,9 @@
-
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
-
 import javax.sql.DataSource;
-
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
