@@ -1,55 +1,29 @@
-import java.util.Objects;
-import java.util.Scanner;
-
 public class Lab {
-    private String lab;
-    private int cost;
+    private String id;
+    private String name;
+    private String status;
+    private String result;
 
-    public Lab() { }
-
-    public Lab(String lab, int cost) {
-        this.lab = requireNonBlank(lab, "lab");
-        setCost(cost);
+    public Lab(String id, String name, String status, String result) {
+        this.id = id;
+        this.name = name;
+        this.status = status;
+        this.result = result;
     }
 
-    private static String requireNonBlank(String v, String field) {
-        if (v == null || v.trim().isEmpty()) throw new IllegalArgumentException(field + " cannot be blank");
-        return v;
-    }
+    public String getId() { return id; }
+    public String getName() { return name; }
+    public String getStatus() { return status; }
+    public String getResult() { return result; }
 
-    public String getLab() { return lab; }
-    public void setLab(String lab) { this.lab = requireNonBlank(lab, "lab"); }
+    public void setId(String id) { this.id = id; }
+    public void setName(String name) { this.name = name; }
+    public void setStatus(String status) { this.status = status; }
+    public void setResult(String result) { this.result = result; }
 
-    public int getCost() { return cost; }
-    public void setCost(int cost) {
-        if (cost < 0) throw new IllegalArgumentException("cost must be >= 0");
-        this.cost = cost;
+    @Override
+    public String toString() {
+        return String.format("%-10s\t%-20s\t%-12s\t%-20s",
+            id, name, status, result == null ? "" : result);
     }
-
-    @Deprecated
-    public void newLab(Scanner input) {
-        System.out.print("Enter lab: ");              // fixed prompt (was "facility" before)
-        this.lab = input.nextLine();
-        System.out.print("Enter cost: ");
-        String c = input.nextLine();
-        this.cost = Integer.parseInt(c.trim());
-    }
-
-    @Deprecated
-    public void newLab() {
-        newLab(new Scanner(System.in));
-    }
-
-    public String labList() {
-        return lab + "\t" + cost;
-    }
-
-    @Override public String toString() { return labList(); }
-    @Override public boolean equals(Object o) {
-        if (this == o) return true;
-        if (!(o instanceof Lab)) return false;
-        Lab other = (Lab) o;
-        return Objects.equals(lab, other.lab);
-    }
-    @Override public int hashCode() { return Objects.hash(lab); }
 }
