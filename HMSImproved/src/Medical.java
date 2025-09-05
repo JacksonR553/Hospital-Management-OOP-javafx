@@ -1,36 +1,41 @@
 import java.util.Objects;
-import java.util.Scanner;
 
 public class Medical {
+    private String id;               // user-defined primary key (TEXT)
     private String name;
     private String manufacturer;
-    private String expiryDate; // keep as String for now (UI expects it)
+    private String expiryDate;       // YYYY-MM-DD
     private int cost;
     private int count;
 
-    public Medical() { }
+    public Medical() {}
 
-    public Medical(String name, String manufacturer, String expiryDate, int cost, int count) {
-        this.name = requireNonBlank(name, "name");
-        this.manufacturer = requireNonBlank(manufacturer, "manufacturer");
-        this.expiryDate = requireNonBlank(expiryDate, "expiryDate");
-        setCost(cost);
-        setCount(count);
+    public Medical(String id, String name, String manufacturer, String expiryDate, int cost, int count) {
+        this.id = req(id, "id");
+        this.name = req(name, "name");
+        this.manufacturer = req(manufacturer, "manufacturer");
+        this.expiryDate = req(expiryDate, "expiryDate");
+        if (cost < 0) throw new IllegalArgumentException("cost must be >= 0");
+        if (count < 0) throw new IllegalArgumentException("count must be >= 0");
+        this.cost = cost;
+        this.count = count;
     }
 
-    private static String requireNonBlank(String v, String field) {
-        if (v == null || v.trim().isEmpty()) throw new IllegalArgumentException(field + " cannot be blank");
-        return v;
+    public static Medical of(String id, String name, String manufacturer, String expiryDate, int cost, int count) {
+        return new Medical(id, name, manufacturer, expiryDate, cost, count);
     }
+
+    public String getId() { return id; }
+    public void setId(String id) { this.id = req(id, "id"); }
 
     public String getName() { return name; }
-    public void setName(String name) { this.name = requireNonBlank(name, "name"); }
+    public void setName(String name) { this.name = req(name, "name"); }
 
     public String getManufacturer() { return manufacturer; }
-    public void setManufacturer(String manufacturer) { this.manufacturer = requireNonBlank(manufacturer, "manufacturer"); }
+    public void setManufacturer(String manufacturer) { this.manufacturer = req(manufacturer, "manufacturer"); }
 
     public String getExpiryDate() { return expiryDate; }
-    public void setExpiryDate(String expiryDate) { this.expiryDate = requireNonBlank(expiryDate, "expiryDate"); }
+    public void setExpiryDate(String expiryDate) { this.expiryDate = req(expiryDate, "expiryDate"); }
 
     public int getCost() { return cost; }
     public void setCost(int cost) {
@@ -44,38 +49,19 @@ public class Medical {
         this.count = count;
     }
 
-    @Deprecated
-    public void newMedical(Scanner input) {
-        System.out.print("Enter medicine name: ");
-        this.name = input.nextLine();
-        System.out.print("Enter medicine manufacturer: ");
-        this.manufacturer = input.nextLine();
-        System.out.print("Enter medicine expiry date: ");
-        this.expiryDate = input.nextLine();
-        System.out.print("Enter medicine cost: ");
-        String c = input.nextLine();
-        this.cost = Integer.parseInt(c.trim());
-        System.out.print("Enter medicine number of unit: ");
-        String n = input.nextLine();
-        this.count = Integer.parseInt(n.trim());
+    private static String req(String v, String field) {
+        if (v == null || v.trim().isEmpty()) throw new IllegalArgumentException(field + " is required");
+        return v.trim();
     }
 
-    @Deprecated
-    public void newMedical() {
-        newMedical(new Scanner(System.in));
-    }
-
-    /** Keep original display formatting. */
-    public String findMedical() {
-        return String.format("%-20s%-20s%-17s$%d", name, manufacturer, expiryDate, cost);
-    }
-
-    @Override public String toString() { return findMedical(); }
     @Override public boolean equals(Object o) {
         if (this == o) return true;
         if (!(o instanceof Medical)) return false;
-        Medical other = (Medical) o;
-        return Objects.equals(name, other.name);
+        return id.equals(((Medical) o).id);
     }
-    @Override public int hashCode() { return Objects.hash(name); }
+    @Override public int hashCode() { return Objects.hash(id); }
+
+    @Override public String toString() {
+        return "Medical{id='" + id + "', name='" + name + "'}";
+    }
 }
