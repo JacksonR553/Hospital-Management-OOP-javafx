@@ -3,11 +3,13 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+
 import javax.sql.DataSource;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
@@ -29,10 +31,12 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontPosture;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
+import javafx.scene.chart.*;
 import javafx.stage.Stage;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.util.Duration;
+import javafx.stage.Modality;
 
 public class HospitalManagement extends Application {
 	// ===== Theme constants (black & white with optional subtle greys) =====
@@ -60,8 +64,33 @@ public class HospitalManagement extends Application {
 	private SqlMedicalRepository medicalRepo;
 	private SqlLabRepository labRepo;
 	private SqlFacilityRepository facilityRepo;
+	private AuditLogRepository auditRepo;
+	
+	// ===== Consistent colors by entity (shared across charts) =====
+	private static final java.util.Map<String, String> ENTITY_COLORS = java.util.Map.of(
+	    "Patients",   "#1f77b4",
+	    "Doctors",    "#ff7f0e",
+	    "Staff",      "#2ca02c",
+	    "Medical",    "#d62728",
+	    "Labs",       "#9467bd",
+	    "Facilities", "#8c564b"
+	);
 
 	// ===== Shared UI state used by multiple handlers =====
+	// --- Toast/alerts infra ---
+	private StackPane mainRoot;              // main menu root so we can overlay toasts
+	private VBox toastArea;                  // bottom-right toast stack
+	private final java.util.ArrayDeque<Runnable> toastQueue = new java.util.ArrayDeque<>();
+	// serialize lightweightChecks so it never runs concurrently
+	private final java.util.concurrent.locks.ReentrantLock checkLock = new java.util.concurrent.locks.ReentrantLock();
+	private boolean goToMedicalListAfterOpen = false;  // navigation flag after opening Medical UI
+
+	// A tiny DTO for notifications we fetch from DB
+	private static final class NotificationRow {
+	    final int id; final String severity; final String title; final String detail;
+	    NotificationRow(int id, String sev, String t, String d) { this.id = id; this.severity = sev; this.title = t; this.detail = d; }
+	}
+	
 	// Patient section state (IDs selected from ListView etc.)
 	private ListView<String> patientListView;
 	private String selectedPatientId;
@@ -76,7 +105,7 @@ public class HospitalManagement extends Application {
 
 	// Medical section
 	private ListView<String> medicalListView;
-	private String selectedMedicalName;
+	private String selectedMedicalId;
 
 	// Lab section
 	private ListView<String> labListView;
@@ -151,16 +180,6 @@ public class HospitalManagement extends Application {
 	    return lv;
 	}
 
-	private BorderPane simpleBorderPane(String title) {
-	    // top banner (white background with black text, minimal)
-	    BorderPane bp = new BorderPane();
-	    bp.setStyle("-fx-background-color: " + BG_WHITE + "; -fx-font-family: " + FONT_FAMILY + ";");
-	    Label t = titleLabel(title);
-	    BorderPane.setMargin(t, PAD);
-	    bp.setTop(t);
-	    return bp;
-	}
-
 	private boolean confirm(String title, String message) {
 	    // If you already have a shared confirm(...) for Medical, reuse that and delete this.
 	    javafx.scene.control.Alert a = new javafx.scene.control.Alert(javafx.scene.control.Alert.AlertType.CONFIRMATION);
@@ -169,6 +188,45 @@ public class HospitalManagement extends Application {
 	    a.setContentText(message);
 	    var res = a.showAndWait();
 	    return res.isPresent() && res.get() == javafx.scene.control.ButtonType.OK;
+	}
+	
+	private void showAuditLogPopup() {
+	    // small, read-only window with recent log lines
+	    ListView<String> lv = makeBWListView();
+	    lv.setMinHeight(260);
+	    lv.setStyle(lv.getStyle() + "-fx-font-size: 12px;"); // compact
+
+	    Label header = new Label("TIMESTAMP                                             TABLE              ACTION           ENTITY");
+	    header.setStyle("-fx-text-fill: #000000; -fx-font-weight: bold;");
+	    BorderPane.setMargin(header, new Insets(8));
+
+	    lv.getItems().clear();
+	    if (auditRepo != null) {
+	        var logs = auditRepo.findRecent(120); // last 120 entries
+	        for (AuditLog a : logs) {
+	            String ts = ns(a.getTs());
+	            if (ts.length() > 23) ts = ts.substring(0, 23);
+	            String row = String.format("%-30s %-10s %-10s %-10s",
+	                    ts,
+	                    ns(a.getTableName()),
+	                    ns(a.getAction()),
+	                    ns(a.getEntityId()));
+	            lv.getItems().add(row);
+	        }
+	    }
+
+	    BorderPane pane = new BorderPane();
+	    pane.setStyle("-fx-background-color: #FFFFFF;");
+	    pane.setTop(header);
+	    pane.setCenter(lv);
+
+	    Stage s = new Stage();
+	    s.initOwner(primaryStage);
+	    s.initModality(Modality.NONE);
+	    s.setResizable(false);
+	    s.setTitle("Audit Log");
+	    s.setScene(new Scene(pane, 520, 320));
+	    s.show();
 	}
 
 	// ----------------------------------------------------------------------------------
@@ -187,6 +245,96 @@ public class HospitalManagement extends Application {
 		// TODO Auto-generated method stub
 		launch(args);
 	}
+	
+	// ---- Simple HMS scheduler ----
+	private final java.util.concurrent.ScheduledExecutorService exec =
+	    java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+	        Thread t = new Thread(r, "hms-scheduler");
+	        t.setDaemon(true);
+	        return t;
+	    });
+
+	private void startJobs() {
+	    // Every 60s: run low-stock and expiring-med checks
+	    exec.scheduleAtFixedRate(this::lightweightChecks, 30, 60, java.util.concurrent.TimeUnit.SECONDS);
+	}
+
+	private void lightweightChecks() {
+	    if (!checkLock.tryLock()) {
+	        // a previous run is still in progress; skip this tick
+	        return;
+	    }
+	    try (var c = Db.get().getConnection()) {
+	        // avoid immediate SQLITE_BUSY
+	        try (var st = c.createStatement()) {
+	            st.execute("PRAGMA busy_timeout = 3000"); // 3s
+	        }
+
+	        c.setAutoCommit(false);
+	        try (
+	            var sLow = c.createStatement();
+	            var sExp = c.createStatement();
+	            var psIns = c.prepareStatement(
+	                "INSERT INTO notification(severity,title,detail) " +
+	                "SELECT ?, ?, ? WHERE NOT EXISTS (" +
+	                "  SELECT 1 FROM notification WHERE severity=? AND title=? AND detail=? AND seen=0" +
+	                ")"
+	            )
+	        ) {
+	            // Low stock
+	            try (var rs = sLow.executeQuery("SELECT id,name,count FROM medical WHERE count <= 10")) {
+	                while (rs.next()) {
+	                    String id = rs.getString("id");
+	                    String name = rs.getString("name");
+	                    int count = rs.getInt("count");
+	                    String title  = "Low stock: " + name;
+	                    String detail = "ID " + id + ", count=" + count;
+
+	                    psIns.setString(1, "WARN");
+	                    psIns.setString(2, title);
+	                    psIns.setString(3, detail);
+	                    // de-dupe same unseen notification
+	                    psIns.setString(4, "WARN");
+	                    psIns.setString(5, title);
+	                    psIns.setString(6, detail);
+	                    psIns.addBatch();
+	                }
+	            }
+
+	            // Expiring within 30 days
+	            try (var rs = sExp.executeQuery(
+	                "SELECT id,name,expiry_date FROM medical " +
+	                "WHERE date(expiry_date) <= date('now','+30 day')"
+	            )) {
+	                while (rs.next()) {
+	                    String id = rs.getString("id");
+	                    String name = rs.getString("name");
+	                    String expiry = rs.getString("expiry_date");
+	                    String title  = "Expiring soon: " + name;
+	                    String detail = "ID " + id + ", expires " + expiry;
+
+	                    psIns.setString(1, "INFO");
+	                    psIns.setString(2, title);
+	                    psIns.setString(3, detail);
+	                    psIns.setString(4, "INFO");
+	                    psIns.setString(5, title);
+	                    psIns.setString(6, detail);
+	                    psIns.addBatch();
+	                }
+	            }
+
+	            psIns.executeBatch();
+	            c.commit();
+	        } catch (Exception e) {
+	            try { c.rollback(); } catch (Exception ignore) {}
+	            throw e;
+	        }
+	    } catch (Exception ex) {
+	        ex.printStackTrace();
+	    } finally {
+	        checkLock.unlock();
+	    }
+	}
 
 	@Override
 	public void start(Stage primaryStage) throws Exception {
@@ -200,6 +348,7 @@ public class HospitalManagement extends Application {
 	    medicalRepo  = new SqlMedicalRepository(Db.get());
 	    labRepo      = new SqlLabRepository(Db.get());
 	    facilityRepo = new SqlFacilityRepository(Db.get());
+	    this.auditRepo = new SqlAuditLogRepository(Db.get());
 
 		// ----------------------------------------------------------------------------------
 		// MAIN MENU (modern, minimal, larger)
@@ -305,6 +454,61 @@ public class HospitalManagement extends Application {
 		card.getChildren().addAll(header, grid);
 		StackPane.setMargin(card, new Insets(40, 40, 40, 40));
 		root.getChildren().add(card);
+		
+		// ---- tiny Audit Log button in the bottom-right corner of the main menu ----
+		Button auditBtn = new Button("Audit Log");
+		auditBtn.setMinWidth(100);
+		auditBtn.setMinHeight(32);
+		auditBtn.setStyle(
+		    "-fx-background-color: #FFFFFF;" +
+		    "-fx-text-fill: #000000;" +
+		    "-fx-border-color: #000000;" +
+		    "-fx-border-width: 1px;" +
+		    "-fx-font-size: 12px;" +
+		    "-fx-font-weight: 600;" +
+		    "-fx-background-radius: 8;" +
+		    "-fx-border-radius: 8;"
+		);
+		auditBtn.setOnAction(e -> showAuditLogPopup());
+
+		// place it in the corner
+		root.getChildren().add(auditBtn);
+		StackPane.setAlignment(auditBtn, Pos.BOTTOM_RIGHT);
+		StackPane.setMargin(auditBtn, new Insets(0, 12, 12, 0));
+		
+		// ---- tiny Dashboard button in the bottom-left corner (same style as Audit Log) ----
+		Button dashboardBtn = new Button("Dashboard");
+		dashboardBtn.setMinWidth(100);
+		dashboardBtn.setMinHeight(32);
+		dashboardBtn.setStyle(
+		    "-fx-background-color: #FFFFFF;" +
+		    "-fx-text-fill: #000000;" +
+		    "-fx-border-color: #000000;" +
+		    "-fx-border-width: 1px;" +
+		    "-fx-font-size: 12px;" +
+		    "-fx-font-weight: 600;" +
+		    "-fx-background-radius: 8;" +
+		    "-fx-border-radius: 8;"
+		);
+		dashboardBtn.setOnAction(e -> showDashboardPopup());
+
+		root.getChildren().add(dashboardBtn);
+		StackPane.setAlignment(dashboardBtn, Pos.BOTTOM_LEFT);
+		StackPane.setMargin(dashboardBtn, new Insets(0, 0, 12, 12));
+		
+		// --- toast overlay mount (bottom-right queue) ---
+		this.mainRoot = root;
+
+		toastArea = new VBox(8);
+		toastArea.setPickOnBounds(false);
+		toastArea.setMouseTransparent(false);
+		toastArea.setPadding(new Insets(0, 12, 12, 0));
+		toastArea.setMaxWidth(320);
+
+		root.getChildren().add(toastArea);
+		StackPane.setAlignment(toastArea, Pos.BOTTOM_RIGHT);
+		// make sure it's on top of everything that was just added
+		toastArea.toFront();
 
 		// Scene
 		Scene mainMenu = new Scene(root, 900, 650);
@@ -321,6 +525,12 @@ public class HospitalManagement extends Application {
 		primaryStage.setScene(mainMenu);
 		primaryStage.setTitle("Hospital Management System");
 		primaryStage.show();
+		
+		startJobs();
+		// Run checks once immediately on startup
+		lightweightChecks();
+		// Try to show any unseen notifications on app open
+		showAlertsOnStartup();
 	}
 
 	// ----------------------------------------------------------------------------------
@@ -1129,7 +1339,7 @@ public class HospitalManagement extends Application {
 
 		            boolean ok = patientRepo.update(updated);
 		            patientTf7.setText(ok ? "Updated " + selectedPatientId : "Failed to update " + selectedPatientId);
-
+		            
 		            // 5) restore "Add" mode UI and handler
 		            patientTf1.setEditable(true);
 		            addPatientTo.setText("Add");
@@ -1313,8 +1523,8 @@ public class HospitalManagement extends Application {
 	    medicalListView.setOnMouseClicked(ev -> {
 	        String row = medicalListView.getSelectionModel().getSelectedItem();
 	        // First column is ID, width 10
-	        selectedMedicalName = leading(row, 10); // NOTE: reusing existing variable name to avoid introducing new fields; it now stores the ID
-	        medicalTf7.setText("Selected ID: " + ns(selectedMedicalName));
+	        selectedMedicalId = leading(row, 10); // NOTE: reusing existing variable name to avoid introducing new fields; it now stores the ID
+	        medicalTf7.setText("Selected ID: " + ns(selectedMedicalId));
 	    });
 
 	    // BorderPane layout
@@ -1397,7 +1607,7 @@ public class HospitalManagement extends Application {
 	    updateMedical.setOnAction(e -> {
 	        medicalTf7.setText("");
 
-	        String id = selectedMedicalName; // stores ID from selection
+	        String id = selectedMedicalId; // stores ID from selection
 	        if ((id == null || id.isBlank()) && medicalListView != null) {
 	            String row = medicalListView.getSelectionModel().getSelectedItem();
 	            if (row != null) id = leading(row, 10);
@@ -1470,7 +1680,7 @@ public class HospitalManagement extends Application {
 	    });
 
 	    deleteMedical.setOnAction(e -> {
-	        String id = selectedMedicalName; // stores ID
+	        String id = selectedMedicalId; // stores ID
 	        if ((id == null || id.isBlank()) && medicalListView != null) {
 	            String row = medicalListView.getSelectionModel().getSelectedItem();
 	            if (row != null) id = leading(row, 10);
@@ -1489,6 +1699,23 @@ public class HospitalManagement extends Application {
 	    // set scene
 	    Scene medicalScene = new Scene(main6, 1000, 600);
 	    primaryStage.setScene(medicalScene);
+	    
+	    // If a toast asked us to jump straight to the list:
+	    if (goToMedicalListAfterOpen) {
+	        goToMedicalListAfterOpen = false;
+	        Platform.runLater(() -> {
+	            try {
+	                // Find and fire the "Show Medical" button we created above
+	                VBox left = (VBox) ((BorderPane) medicalScene.getRoot()).getLeft();
+	                for (javafx.scene.Node n : left.getChildren()) {
+	                    if (n instanceof Button b && "Show Medical".equals(b.getText())) {
+	                        b.fire();
+	                        break;
+	                    }
+	                }
+	            } catch (Exception ignored) {}
+	        });
+	    }
 	}
 
 	// ----------------------------------------------------------------------------------
@@ -1894,7 +2121,7 @@ public class HospitalManagement extends Application {
 		showFacility.setOnAction(e -> {
 			facilityV2.getChildren().clear();
 
-			Label facilityHeader = new Label("   ID            NAME             DESCRIPTION                                   STATUS             CAPACITY");
+			Label facilityHeader = new Label("   ID            NAME                           DESCRIPTION                                   STATUS             CAPACITY");
 			facilityHeader.setFont(Font.font("Poppins", FontWeight.BOLD, FontPosture.REGULAR, 15));
 			facilityHeader.setStyle("-fx-text-fill: #000000;");
 
@@ -1902,7 +2129,7 @@ public class HospitalManagement extends Application {
 			java.util.List<Facility> all = new java.util.ArrayList<>(facilityRepo.findAll());
 			all.sort((a, b) -> cmpId(a.getId(), b.getId()));
 			for (Facility ff : all) {
-				String row = String.format("%-10s%-10s%-35s%-15s%-10s",
+				String row = String.format("%-10s%-20s%-35s%-15s%-10s",
 						ns(ff.getId()), ns(ff.getName()), ns(ff.getDescription()), ns(ff.getStatus()), ns(String.valueOf(ff.getCapacity())));
 				facilityListView.getItems().add(row);
 			}
@@ -1993,6 +2220,199 @@ public class HospitalManagement extends Application {
 
 	// ----------------------------------------------------------------------------------
 	// Helpers
+	
+	// Tiny rounded square used as a color chip next to labels
+	private static javafx.scene.layout.Region colorChip(String hex) {
+	    javafx.scene.layout.Region r = new javafx.scene.layout.Region();
+	    r.setMinSize(10, 10);
+	    r.setPrefSize(10, 10);
+	    r.setMaxSize(10, 10);
+	    r.setStyle(
+	        "-fx-background-color: " + hex + ";" +
+	        "-fx-background-radius: 2;" +
+	        "-fx-border-color: #000000;" +
+	        "-fx-border-width: 1;" +
+	        "-fx-border-radius: 2;"
+	    );
+	    return r;
+	}
+
+	// Robustly apply a pie slice color (works whether node exists yet or not)
+	private static void applyPieSliceColor(javafx.scene.chart.PieChart.Data d, String hex) {
+	    if (d.getNode() != null) {
+	        d.getNode().setStyle("-fx-pie-color: " + hex + ";");
+	    }
+	    d.nodeProperty().addListener((obs, oldN, newN) -> {
+	        if (newN != null) newN.setStyle("-fx-pie-color: " + hex + ";");
+	    });
+	}
+	
+	// === Notification table safety: ensure columns exist (id, severity, title, detail, seen, created_at)
+	private void ensureNotificationTableColumns() {
+	    try (var c = Db.get().getConnection(); var s = c.createStatement()) {
+	        // Add columns if they don't exist (SQLite-friendly)
+	        try { s.executeUpdate("ALTER TABLE notification ADD COLUMN seen INTEGER DEFAULT 0"); } catch (Exception ignore) {}
+	        try { s.executeUpdate("ALTER TABLE notification ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"); } catch (Exception ignore) {}
+	    } catch (Exception ignore) {}
+	}
+
+	// === Fetch unseen notifications (oldest first)
+	private java.util.List<NotificationRow> fetchUnseenNotifications() {
+	    ensureNotificationTableColumns();
+	    java.util.List<NotificationRow> out = new java.util.ArrayList<>();
+	    try (var c = Db.get().getConnection();
+	         var ps = c.prepareStatement(
+	             "SELECT id,severity,title,detail " +
+	             "FROM notification WHERE COALESCE(seen,0)=0 " +
+	             "ORDER BY COALESCE(created_at,datetime('now')) ASC, id ASC")) {
+	        try (var rs = ps.executeQuery()) {
+	            while (rs.next()) {
+	                out.add(new NotificationRow(
+	                    rs.getInt("id"),
+	                    ns(rs.getString("severity")),
+	                    ns(rs.getString("title")),
+	                    ns(rs.getString("detail"))
+	                ));
+	            }
+	        }
+	    } catch (Exception ignore) {}
+	    return out;
+	}
+
+	private void markSeen(int id) {
+	    try (var c = Db.get().getConnection();
+	         var ps = c.prepareStatement("UPDATE notification SET seen=1 WHERE id=?")) {
+	        ps.setInt(1, id);
+	        ps.executeUpdate();
+	    } catch (Exception ignore) {}
+	}
+
+	// === Toast queue driver ===
+	private void showAlertsOnStartup() {
+	    var rows = fetchUnseenNotifications();
+	    if (rows.isEmpty()) return;
+
+	    for (var r : rows) {
+	        toastQueue.add(() -> showToast(r, () -> {
+	            handleToastNavigation(r);  // click → go to the right list
+	            markSeen(r.id);
+	        }, () -> {
+	            // closed (X)
+	            markSeen(r.id);
+	        }));
+	    }
+	    playNextToast();
+	}
+
+	private void playNextToast() {
+	    var job = toastQueue.pollFirst();
+	    if (job != null) job.run();
+	}
+
+	// === Toast UI ===
+	private void showToast(NotificationRow r, Runnable onClick, Runnable onClose) {
+	    HBox box = new HBox(12);
+	    box.setAlignment(Pos.CENTER_LEFT);
+	    box.setStyle(
+	        "-fx-background-color: #FFFFFF;" +
+	        "-fx-border-color: #000000;" +
+	        "-fx-border-width: 1px;" +
+	        "-fx-background-radius: 10;" +
+	        "-fx-border-radius: 10;" +
+	        "-fx-padding: 10;"
+	    );
+
+	    Label dot = new Label("●");
+	    dot.setStyle("-fx-font-size: 12px; -fx-font-weight: bold;");
+
+	    VBox text = new VBox(2);
+	    Label title = new Label(r.title);
+	    title.setStyle("-fx-text-fill: #000000; -fx-font-weight: bold; -fx-font-size: 13px;");
+	    Label detail = new Label(r.detail == null ? "" : r.detail);
+	    detail.setStyle("-fx-text-fill: #000000; -fx-font-size: 12px;");
+	    text.getChildren().addAll(title, detail);
+
+	    var spacer = new StackPane();
+	    HBox.setHgrow(spacer, javafx.scene.layout.Priority.ALWAYS);
+
+	    Button close = new Button("✕");
+	    close.setFocusTraversable(false);
+	    close.setStyle("-fx-background-color: transparent; -fx-text-fill: #000000; -fx-font-size: 12px; -fx-cursor: hand;");
+
+	    box.getChildren().addAll(dot, text, spacer, close);
+
+	    // Click: navigate; Close: dismiss
+	    box.setOnMouseClicked(e -> {
+	        if (e.getTarget() != close) {
+	            onClick.run();
+	            dismissToast(box, this::playNextToast);
+	        }
+	    });
+	    close.setOnAction(e -> {
+	        onClose.run();
+	        dismissToast(box, this::playNextToast);
+	    });
+
+	    // Add + animate
+	    toastArea.getChildren().add(box);
+	    toastArea.toFront();
+	    box.setOpacity(0);
+	    box.setTranslateY(20);
+
+	    var fadeIn = new javafx.animation.FadeTransition(Duration.millis(180), box);
+	    fadeIn.setFromValue(0); fadeIn.setToValue(1);
+
+	    var slideIn = new javafx.animation.TranslateTransition(Duration.millis(180), box);
+	    slideIn.setFromY(20); slideIn.setToY(0);
+
+	    var showTime = new javafx.animation.PauseTransition(Duration.seconds(6));
+
+	    var fadeOut = new javafx.animation.FadeTransition(Duration.millis(160), box);
+	    fadeOut.setFromValue(1); fadeOut.setToValue(0);
+
+	    var seq = new javafx.animation.SequentialTransition(
+	        new javafx.animation.ParallelTransition(fadeIn, slideIn),
+	        showTime,
+	        fadeOut
+	    );
+	    seq.setOnFinished(e -> {
+	        toastArea.getChildren().remove(box);
+	        playNextToast();
+	    });
+	    seq.play();
+	}
+
+	private void dismissToast(javafx.scene.Node n, Runnable after) {
+	    var fade = new javafx.animation.FadeTransition(Duration.millis(120), n);
+	    fade.setFromValue(1); fade.setToValue(0);
+	    fade.setOnFinished(e -> {
+	        toastArea.getChildren().remove(n);
+	        if (after != null) after.run();
+	    });
+	    fade.play();
+	}
+
+	// === Where a toast should send the user ===
+	// Today: all your automated alerts are for Medical (low stock, expiring).
+	// Extend this to route other types later (e.g., if r.title startsWith("Overdue bill:") → showPatientMenu()).
+	private void handleToastNavigation(NotificationRow r) {
+	    goToMedicalListAfterOpen = true;
+	    showMedicalMenu();
+	}
+	
+	private void notifyInfo(String title, String detail) { insertNotification("INFO", title, detail); }
+	private void notifyWarn(String title, String detail) { insertNotification("WARN", title, detail); }
+
+	private void insertNotification(String severity, String title, String detail) {
+	    try (var c = Db.get().getConnection();
+	         var ps = c.prepareStatement(
+	            "INSERT INTO notification(severity,title,detail) VALUES(?,?,?)")) {
+	        ps.setString(1, severity);
+	        ps.setString(2, title);
+	        ps.setString(3, detail);
+	        ps.executeUpdate();
+	    } catch (Exception ignored) {}
+	}
 
 	private int cmpId(String a, String b) {
 		if (a == null && b == null) return 0;
@@ -2015,4 +2435,253 @@ public class HospitalManagement extends Application {
 		alert.showAndWait();
 	}
 	
+	// Format a whole-number percentage like "28%"
+	private static String pct(int part, int total) {
+	    if (total <= 0) return "0%";
+	    long r = Math.round(part * 100.0 / total);
+	    return r + "%";
+	}
+
+	// Strip any " (…)" suffix so color lookup stays stable
+	private static String baseName(String name) {
+	    if (name == null) return "";
+	    int i = name.indexOf(" (");
+	    return i >= 0 ? name.substring(0, i) : name;
+	}
+	
+	// === Compact Dashboard popup (bottom-left button opens this) ===
+	// === Dashboard popup with visuals ===
+	private void showDashboardPopup() {
+		// ----- 1) Legend-style entity summary (swatches match the pie chart) -----
+		Label patientsCount   = new Label();
+		Label doctorsCount    = new Label();
+		Label staffCount      = new Label();
+		Label medicalCount    = new Label();
+		Label labsCount       = new Label();
+		Label facilitiesCount = new Label();
+		Label notifsCount     = new Label();
+
+		// Common styling
+		java.util.function.Consumer<Label> styleCount = l ->
+		    l.setStyle("-fx-text-fill:#000000; -fx-font-size:13px; -fx-font-family: " + FONT_FAMILY + ";");
+		java.util.function.Function<String, Label> nameLabel = txt -> {
+		    Label l = new Label(txt);
+		    l.setStyle("-fx-text-fill:#000000; -fx-font-size:13px; -fx-font-weight:700; -fx-font-family: " + FONT_FAMILY + ";");
+		    return l;
+		};
+
+		// Build tidy rows: [chip] [Name] ..... [Count]
+		java.util.function.BiFunction<String, Label, javafx.scene.layout.HBox> row = (key, countLabel) -> {
+		    String hex = ENTITY_COLORS.getOrDefault(key, "#999999");
+		    var chip = colorChip(hex);
+		    var name = nameLabel.apply(key);
+		    var spacer = new javafx.scene.layout.Region();
+		    javafx.scene.layout.HBox.setHgrow(spacer, javafx.scene.layout.Priority.ALWAYS);
+		    styleCount.accept(countLabel);
+		    var h = new javafx.scene.layout.HBox(8, chip, name, spacer, countLabel);
+		    h.setAlignment(Pos.CENTER_LEFT);
+		    return h;
+		};
+
+		var summaryTitle = new Label("Overview");
+		summaryTitle.setStyle("-fx-text-fill:#000000; -fx-font-size:14px; -fx-font-weight:800; -fx-font-family: " + FONT_FAMILY + ";");
+
+		VBox summaryBox = new VBox(
+		    6,
+		    summaryTitle,
+		    row.apply("Patients",   patientsCount),
+		    row.apply("Doctors",    doctorsCount),
+		    row.apply("Staff",      staffCount),
+		    row.apply("Medical",    medicalCount),
+		    row.apply("Labs",       labsCount),
+		    row.apply("Facilities", facilitiesCount),
+		    new Label(""), // small spacer line before notifications
+		    row.apply("Notifications", notifsCount)  // (keeps layout consistent)
+		);
+		summaryBox.setPadding(new Insets(8));
+
+		// Update counts (numbers only, the label text is the left name)
+		Runnable refreshCounts = () -> {
+		    try {
+		        patientsCount.setText(String.valueOf(patientRepo.findAll().size()));
+		        doctorsCount.setText(String.valueOf(doctorRepo.findAll().size()));
+		        staffCount.setText(String.valueOf(staffRepo.findAll().size()));
+		        medicalCount.setText(String.valueOf(medicalRepo.findAll().size()));
+		        labsCount.setText(String.valueOf(labRepo.findAll().size()));
+		        facilitiesCount.setText(String.valueOf(facilityRepo.findAll().size()));
+
+		        ensureNotificationTableColumns();
+		        int unseen = 0;
+		        try (var c = Db.get().getConnection();
+		             var rs = c.createStatement().executeQuery(
+		                 "SELECT COUNT(*) FROM notification WHERE COALESCE(seen,0)=0")) {
+		            if (rs.next()) unseen = rs.getInt(1);
+		        }
+		        notifsCount.setText(String.valueOf(unseen));
+		    } catch (Exception e) {
+		        patientsCount.setText("?"); doctorsCount.setText("?"); staffCount.setText("?");
+		        medicalCount.setText("?");  labsCount.setText("?");   facilitiesCount.setText("?");
+		        notifsCount.setText("?");
+		    }
+		};
+
+//	    VBox summaryBox = new VBox(6, patientsCount, doctorsCount, staffCount,
+//	                               medicalCount, labsCount, facilitiesCount, notifsCount);
+//	    summaryBox.setPadding(new Insets(8));
+//	    for (Node n : summaryBox.getChildren()) {
+//	        if (n instanceof Label l) {
+//	            l.setStyle("-fx-text-fill:#000000; -fx-font-size:13px; -fx-font-weight:bold;");
+//	        }
+//	    }
+
+	    // ----- 2) Visualization: Pie chart for entity distribution -----
+	    PieChart distributionChart = new PieChart();
+	    distributionChart.setLabelsVisible(true);
+	    distributionChart.setLegendVisible(true);
+	    distributionChart.setTitle("Entity Distribution");
+
+	    Runnable refreshChart = () -> {
+	        distributionChart.getData().clear();
+
+	        int cPatients   = patientRepo.findAll().size();
+	        int cDoctors    = doctorRepo.findAll().size();
+	        int cStaff      = staffRepo.findAll().size();
+	        int cMedical    = medicalRepo.findAll().size();
+	        int cLabs       = labRepo.findAll().size();
+	        int cFacilities = facilityRepo.findAll().size();
+
+	        int total = cPatients + cDoctors + cStaff + cMedical + cLabs + cFacilities;
+
+	        // Display names now include percentages (legend & labels will show them)
+	        PieChart.Data d1 = new PieChart.Data("Patients"   + " (" + pct(cPatients,   total) + ")", cPatients);
+	        PieChart.Data d2 = new PieChart.Data("Doctors"    + " (" + pct(cDoctors,    total) + ")", cDoctors);
+	        PieChart.Data d3 = new PieChart.Data("Staff"      + " (" + pct(cStaff,      total) + ")", cStaff);
+	        PieChart.Data d4 = new PieChart.Data("Medical"    + " (" + pct(cMedical,    total) + ")", cMedical);
+	        PieChart.Data d5 = new PieChart.Data("Labs"       + " (" + pct(cLabs,       total) + ")", cLabs);
+	        PieChart.Data d6 = new PieChart.Data("Facilities" + " (" + pct(cFacilities, total) + ")", cFacilities);
+
+	        distributionChart.getData().addAll(d1, d2, d3, d4, d5, d6);
+
+	        // Apply consistent colors using the base entity name (without % suffix)
+	        for (PieChart.Data d : distributionChart.getData()) {
+	            String key = baseName(d.getName()); // e.g., "Patients"
+	            String color = ENTITY_COLORS.getOrDefault(key, "#999999");
+	            // Node might be null until rendered; run later to be safe
+	            Platform.runLater(() -> {
+	                if (d.getNode() != null) d.getNode().setStyle("-fx-pie-color: " + color + ";");
+	            });
+	        }
+
+	        // (Optional but nice) Show a tooltip with absolute count and percent
+	        for (PieChart.Data d : distributionChart.getData()) {
+	            String key = baseName(d.getName());
+	            int count = (int) d.getPieValue();
+	            String tip  = key + ": " + count + " (" + pct(count, total) + ")";
+	            javafx.scene.control.Tooltip.install(d.getNode(), new javafx.scene.control.Tooltip(tip));
+	        }
+	    };
+
+	    // ----- 3) Visualization: Bar chart for medical stock -----
+	    CategoryAxis xAxis = new CategoryAxis();
+	    NumberAxis yAxis = new NumberAxis();
+	    BarChart<String, Number> stockChart = new BarChart<>(xAxis, yAxis);
+	    stockChart.setTitle("Low Stock Medicines");
+	    xAxis.setLabel("Medical ID");
+	    yAxis.setLabel("Count");
+	    stockChart.setLegendVisible(false);
+
+	    Runnable refreshStock = () -> {
+	        stockChart.getData().clear();
+	        XYChart.Series<String, Number> series = new XYChart.Series<>();
+	        try (var c = Db.get().getConnection();
+	             var rs = c.createStatement().executeQuery(
+	                 "SELECT id,count FROM medical ORDER BY count ASC LIMIT 5")) {
+	            while (rs.next()) {
+	                series.getData().add(new XYChart.Data<>(rs.getString("id"), rs.getInt("count")));
+	            }
+	        } catch (Exception ignored) {}
+	        stockChart.getData().add(series);
+
+	        // Apply consistent bar color (Medical = red)
+	        for (XYChart.Data<String, Number> data : series.getData()) {
+	            Node node = data.getNode();
+	            if (node != null) {
+	                node.setStyle("-fx-bar-fill: " + ENTITY_COLORS.get("Medical") + ";");
+	            }
+	        }
+	    };
+
+	    // ----- 4) Lists: Low stock + Expiring soon -----
+	    ListView<String> lvLowStock  = makeBWListView();
+	    ListView<String> lvExpSoon   = makeBWListView();
+	    lvLowStock.setMinHeight(140);
+	    lvExpSoon.setMinHeight(140);
+
+	    Runnable refreshLists = () -> {
+	        lvLowStock.getItems().clear();
+	        lvExpSoon.getItems().clear();
+	        try (var c = Db.get().getConnection()) {
+	            try (var rs = c.createStatement().executeQuery(
+	                    "SELECT id,name,count FROM medical WHERE count <= 10 ORDER BY count ASC LIMIT 10")) {
+	                while (rs.next()) {
+	                    lvLowStock.getItems().add(
+	                        String.format("%-8s %-18s count=%d",
+	                                      ns(rs.getString("id")), ns(rs.getString("name")), rs.getInt("count")));
+	                }
+	            }
+	            try (var rs = c.createStatement().executeQuery(
+	                    "SELECT id,name,expiry_date FROM medical " +
+	                    "WHERE date(expiry_date) <= date('now','+30 day') ORDER BY date(expiry_date) ASC LIMIT 10")) {
+	                while (rs.next()) {
+	                    lvExpSoon.getItems().add(
+	                        String.format("%-8s %-18s expires %s",
+	                                      ns(rs.getString("id")), ns(rs.getString("name")), rs.getString("expiry_date")));
+	                }
+	            }
+	        } catch (Exception ignored) {}
+	    };
+
+	    // ----- 5) Refresh button -----
+	    Button refreshBtn = new Button("Refresh");
+	    refreshBtn.setStyle("-fx-background-color:#FFFFFF; -fx-text-fill:#000000; -fx-border-color:#000000;");
+	    refreshBtn.setOnAction(e -> {
+	        refreshCounts.run();
+	        refreshChart.run();
+	        refreshStock.run();
+	        refreshLists.run();
+	    });
+
+	    // ----- Layout -----
+	    BorderPane root = new BorderPane();
+	    root.setStyle("-fx-background-color:#FFFFFF;");
+
+	    // Top row (title + refresh)
+	    Label title = new Label("Dashboard");
+	    title.setStyle("-fx-text-fill:#000000; -fx-font-size:16px; -fx-font-weight:bold;");
+	    HBox topBar = new HBox(12, title, refreshBtn);
+	    topBar.setPadding(new Insets(8));
+	    root.setTop(topBar);
+
+	    // Center area: 2 columns
+	    GridPane grid = new GridPane();
+	    grid.setHgap(20);
+	    grid.setVgap(20);
+	    grid.setPadding(new Insets(12));
+
+	    grid.add(summaryBox, 0, 0);
+	    grid.add(distributionChart, 1, 0);
+	    grid.add(stockChart, 0, 1);
+	    grid.add(new VBox(new Label("Low Stock"), lvLowStock), 1, 1);
+	    grid.add(new VBox(new Label("Expiring Soon"), lvExpSoon), 0, 2, 2, 1);
+
+	    root.setCenter(grid);
+
+	    // Show stage
+	    Stage s = new Stage();
+	    s.initOwner(primaryStage);
+	    s.setTitle("Dashboard");
+	    s.setScene(new Scene(root, 850, 650));
+	    refreshBtn.fire(); // auto-load
+	    s.show();
+	}
 }
