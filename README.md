@@ -21,7 +21,8 @@ The system follows a **repository pattern** with CRUD operations and includes **
 
 <p align="center">
 
-  <img src="screenshots/dashboard.jpg" width="70%" alt="Dashboard Overview"/>
+  <img src="Images/Dashboard.jpg" width="70%" alt="Dashboard Overview"/>
+  - Main interface of the HMS.
 </p>
 
 <p align="center">
