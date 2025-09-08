@@ -24,15 +24,43 @@ The system follows a **repository pattern** with CRUD operations and includes **
 </p>
 
 <p align="center">
-  <img src="screenshots/staff_list.png" width="70%" alt="Staff List View"/>
+  <img src="Images/CRUD (Show).jpg" width="70%" alt="Staff List View"/>
 </p>
 
 <p align="center">
-  <img src="screenshots/staff_form.png" width="70%" alt="Staff Form"/>
+  <img src="Images/CRUD (Add).jpg" width="70%" alt="Staff Add View"/>
 </p>
 
 <p align="center">
-  <img src="screenshots/audit_log.png" width="70%" alt="Audit Log"/>
+  <img src="Images/CRUD (Update).jpg" width="70%" alt="Staff Update View"/>
+</p>
+
+<p align="center">
+  <img src="Images/CRUD (Update2).jpg" width="70%" alt="Staff Update 2 View"/>
+</p>
+
+<p align="center">
+  <img src="Images/CRUD (Delete).jpg" width="70%" alt="Staff Delete View"/>
+</p>
+
+<p align="center">
+  <img src="Images/CRUD (Delete2).jpg" width="70%" alt="Staff Delete 2 View"/>
+</p>
+
+<p align="center">
+  <img src="Images/audit.jpg" width="70%" alt="Audit Logging"/>
+</p>
+
+<p align="center">
+  <img src="Images/visualization.jpg" width="70%" alt="Dashboard Visualization"/>
+</p>
+
+<p align="center">
+  <img src="Images/Notification1.jpg" width="70%" alt="Notification Pop Up"/>
+</p>
+
+<p align="center">
+  <img src="Images/Notification2.jpg" width="70%" alt="Notification Navigation"/>
 </p>
 
 ## 🛠️ Tech Stack
@@ -71,6 +99,7 @@ HospitalManagement.java
    * Facility
 3. Access **Dashboard** for statistics & notifications.
 4. Check **Audit Log** for recorded database actions.
+5. Check **Notification** for low stock or expire warnings on start up.
 
 ## 📜 Concluding Notes
 
