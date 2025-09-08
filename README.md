@@ -20,9 +20,7 @@ The system follows a **repository pattern** with CRUD operations and includes **
 ## 📸 Screenshots
 
 <p align="center">
-
   <img src="Images/Dashboard.jpg" width="70%" alt="Dashboard Overview"/>
-  - Main interface of the HMS.
 </p>
 
 <p align="center">
