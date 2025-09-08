@@ -3,8 +3,6 @@
 A **JavaFX-based Hospital Management System** built with **Java 22** and **SQLite**, designed to provide an intuitive interface for managing hospital operations such as **Staff, Doctors, Patients, Medical Inventory, Laboratories, and Facilities**.  
 The system follows a **repository pattern** with CRUD operations and includes **audit logging** and a **real-time dashboard**.
 
----
-
 ## ✨ Features
 - 👨‍⚕️ **Staff, Patient, Doctor, Medical, Lab & Facility Management**  
   CRUD operations (Add, Show, Update, Delete) for all core hospital entities.
@@ -19,12 +17,11 @@ The system follows a **repository pattern** with CRUD operations and includes **
 - 💾 **SQLite Integration**  
   Repository pattern with SQL-based persistence.
 
----
-
 ## 📸 Screenshots
 
 <p align="center">
-  <img src="screenshots/dashboard.png" width="70%" alt="Dashboard Overview"/>
+
+  <img src="[screenshots/dashboard.png](https://github.com/user-attachments/assets/556ff117-472b-4a2b-bfcd-22ddecac8a90)" width="70%" alt="Dashboard Overview"/>
 </p>
 
 <p align="center">
@@ -39,15 +36,11 @@ The system follows a **repository pattern** with CRUD operations and includes **
   <img src="screenshots/audit_log.png" width="70%" alt="Audit Log"/>
 </p>
 
----
-
 ## 🛠️ Tech Stack
 - **Language:** Java 22 ☕
 - **UI Framework:** JavaFX 🎨
 - **Database:** SQLite 💾
 - **Architecture:** Repository Pattern
-
----
 
 ## 📂 Project Structure
 
@@ -71,8 +64,6 @@ src/
 ┣ SqlXXXRepository.java (SQL-backed implementations)
 ┗ HelloFX.java (JavaFX entry point)
 
----
-
 ## 🚀 Getting Started
 
 ### 📋 Prerequisites
@@ -91,13 +82,10 @@ git clone https://github.com/<your-username>/HMSImproved.git
 HospitalManagement.java
 ````
 
----
-
 ## 🎯 Usage
 
 1. Launch the application from `HospitalManagement.java`.
-2. Use the main menu to navigate between:
-
+2. Use the main menu to navigate between (**CRUD operations**):
    * Staff
    * Doctor
    * Patient
@@ -107,34 +95,6 @@ HospitalManagement.java
 3. Access **Dashboard** for statistics & notifications.
 4. Check **Audit Log** for recorded database actions.
 
----
-
-## 📌 Roadmap
-
-* [ ] Add authentication & role-based access (Admin/Doctor/Staff)
-* [ ] Improve medical stock forecasting (predictive analytics)
-* [ ] Export reports in PDF/Excel
-* [ ] Dockerize application for easier deployment
-
----
-
 ## 📜 License
 
 This project is licensed under the **MIT License** – see the [LICENSE](LICENSE) file for details.
-
----
-
-## 👤 Contact
-
-* **Name:** \[Your Name Here]
-* **Email:** \[[your.email@example.com](mailto:your.email@example.com)]
-* **LinkedIn:** \[Your LinkedIn Profile]
-
----
-
-## 🙏 Acknowledgements
-
-* JavaFX community & documentation
-* SQLite official docs
-* Inspired by real-world hospital management workflows
-```
