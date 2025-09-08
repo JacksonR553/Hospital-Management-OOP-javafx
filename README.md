@@ -1,4 +1,3 @@
-```markdown
 # 🏥 Hospital Management System (HMSImproved)
 
 A **JavaFX-based Hospital Management System** built with **Java 22** and **SQLite**, designed to provide an intuitive interface for managing hospital operations such as **Staff, Doctors, Patients, Medical Inventory, Laboratories, and Facilities**.  
@@ -51,7 +50,6 @@ The system follows a **repository pattern** with CRUD operations and includes **
 ---
 
 ## 📂 Project Structure
-```
 
 src/
 ┣ AuditLog.java
@@ -72,8 +70,6 @@ src/
 ┣ StaffRepository.java
 ┣ SqlXXXRepository.java (SQL-backed implementations)
 ┗ HelloFX.java (JavaFX entry point)
-
-````
 
 ---
 
