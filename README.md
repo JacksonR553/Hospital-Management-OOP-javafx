@@ -10,8 +10,8 @@ The system follows a **repository pattern** with CRUD operations and includes **
   Displays entity counts, distribution pie charts, low stock alerts, and expiry notifications.
 - 📝 **Audit Logging**  
   Tracks every database change (INSERT, UPDATE, DELETE) with timestamped records.
-- ⚡ **Low-Stock Alerts**  
-  Real-time medicine notifications (e.g., Insulin stock warning).
+- ⚡ **Low-Stock & Expire Alerts for Medicine Entity**  
+  Real-time medicine notifications (e.g., Insulin stock and expire warning).
 - 🎨 **Minimalist Black & White UI**  
   Clean interface for easy navigation and professional appearance.
 - 💾 **SQLite Integration**  
@@ -41,28 +41,6 @@ The system follows a **repository pattern** with CRUD operations and includes **
 - **UI Framework:** JavaFX 🎨
 - **Database:** SQLite 💾
 - **Architecture:** Repository Pattern
-
-## 📂 Project Structure
-
-src/
-┣ AuditLog.java
-┣ AuditLogRepository.java
-┣ Db.java
-┣ Doctor.java
-┣ DoctorRepository.java
-┣ Facility.java
-┣ FacilityRepository.java
-┣ HospitalManagement.java
-┣ Lab.java
-┣ LabRepository.java
-┣ Medical.java
-┣ MedicalRepository.java
-┣ Patient.java
-┣ PatientRepository.java
-┣ Staff.java
-┣ StaffRepository.java
-┣ SqlXXXRepository.java (SQL-backed implementations)
-┗ HelloFX.java (JavaFX entry point)
 
 ## 🚀 Getting Started
 
@@ -95,6 +73,6 @@ HospitalManagement.java
 3. Access **Dashboard** for statistics & notifications.
 4. Check **Audit Log** for recorded database actions.
 
-## 📜 License
+## 📜 Concluding Notes
 
-This project is licensed under the **MIT License** – see the [LICENSE](LICENSE) file for details.
+Started this project back when I am taking Object-Oriented Programming during University Time. Special Thanks for @BoonChong and @JieYew for the basic work. I enhanced this project further more by adding dashboard, audit logging, automated alert via notification and integrated SQLite. Peace ✌
