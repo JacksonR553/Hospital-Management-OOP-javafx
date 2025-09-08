@@ -21,7 +21,7 @@ The system follows a **repository pattern** with CRUD operations and includes **
 
 <p align="center">
 
-  <img src="[screenshots/dashboard.png](https://github.com/user-attachments/assets/556ff117-472b-4a2b-bfcd-22ddecac8a90)" width="70%" alt="Dashboard Overview"/>
+  <img src="screenshots/dashboard.jpg" width="70%" alt="Dashboard Overview"/>
 </p>
 
 <p align="center">
