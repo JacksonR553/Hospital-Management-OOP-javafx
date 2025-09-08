@@ -17,51 +17,71 @@ The system follows a **repository pattern** with CRUD operations and includes **
 - 💾 **SQLite Integration**  
   Repository pattern with SQL-based persistence.
 
-## 📸 Screenshots
+## 📸 Screenshots & Workflow
 
+### 🏠 Main Dashboard
 <p align="center">
   <img src="Images/Dashboard.jpg" width="70%" alt="Dashboard Overview"/>
 </p>
+The central hub showing all available modules (Staff, Doctor, Patient, Medical, Lab, Facility). Notifications appear here for low stock medicines.
 
+### 👥 Staff Management (CRUD Operations)
+
+#### 🔍 Show Staff
 <p align="center">
   <img src="Images/CRUD (Show).jpg" width="70%" alt="Staff List View"/>
 </p>
+Displays all staff records in a table with columns for ID, Name, Designation, Gender, and Salary.
 
+#### ➕ Add Staff
 <p align="center">
   <img src="Images/CRUD (Add).jpg" width="70%" alt="Staff Add View"/>
 </p>
+Form to add a new staff member into the database.
 
+#### ✏️ Update Staff
 <p align="center">
   <img src="Images/CRUD (Update).jpg" width="70%" alt="Staff Update View"/>
 </p>
-
 <p align="center">
   <img src="Images/CRUD (Update2).jpg" width="70%" alt="Staff Update 2 View"/>
 </p>
+Select an existing record, pre-fill the form, and update staff details.
 
+#### ❌ Delete Staff
 <p align="center">
   <img src="Images/CRUD (Delete).jpg" width="70%" alt="Staff Delete View"/>
 </p>
-
 <p align="center">
   <img src="Images/CRUD (Delete2).jpg" width="70%" alt="Staff Delete 2 View"/>
 </p>
+Select a staff record and remove it permanently from the system.
 
+### 📜 Audit Log
 <p align="center">
   <img src="Images/audit.jpg" width="70%" alt="Audit Logging"/>
 </p>
+Every insert, update, and delete action is logged with a timestamp, table name, action type, and entity ID.
 
+### 📊 Dashboard Visualization
 <p align="center">
   <img src="Images/visualization.jpg" width="70%" alt="Dashboard Visualization"/>
 </p>
+Displays hospital-wide statistics including:
+- Entity distribution (pie chart)  
+- Low stock medicines (bar chart)  
+- Expiring items list  
 
+### 🔔 Notifications
 <p align="center">
   <img src="Images/Notification1.jpg" width="70%" alt="Notification Pop Up"/>
 </p>
+Pop-up notification for critical events (e.g., low stock alert).
 
 <p align="center">
   <img src="Images/Notification2.jpg" width="70%" alt="Notification Navigation"/>
 </p>
+Navigation toward stock view after clicking pop-up notification.
 
 ## 🛠️ Tech Stack
 - **Language:** Java 22 ☕
